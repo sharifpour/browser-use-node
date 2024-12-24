@@ -34,6 +34,46 @@ npm install browser-use-node
 
 - Node.js >= 18.0.0
 - npm or yarn
+- OpenAI API key
+
+### Setting Up Your OpenAI API Key
+
+There are several ways to configure your OpenAI API key:
+
+1. Using environment variables directly:
+```bash
+export OPENAI_API_KEY=your_api_key_here
+```
+
+2. Using a `.env` file:
+```bash
+# Create a .env file in your project root
+echo "OPENAI_API_KEY=your_api_key_here" > .env
+
+# Install dotenv if you haven't already
+npm install dotenv
+
+# In your code
+import * as dotenv from 'dotenv';
+dotenv.config();
+```
+
+3. Using environment variables in Windows:
+```cmd
+set OPENAI_API_KEY=your_api_key_here
+```
+
+4. Passing the API key directly in code (not recommended for production):
+```typescript
+const llm = new ChatOpenAI({
+  modelName: "gpt-4",
+  openAIApiKey: "your_api_key_here", // Not recommended for production
+  maxTokens: 500,
+  temperature: 0,
+});
+```
+
+> ⚠️ **Security Note**: Never commit your API key to version control. Always use environment variables or secure secret management in production.
 
 ## Quick Start
 
