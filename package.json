@@ -1,6 +1,6 @@
 {
 	"name": "browser-use-node",
-	"version": "0.1.3",
+	"version": "0.1.4",
 	"description": "Browser automation powered by LLMs in JavaScript",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -13,7 +13,11 @@
 		"example:amazon": "ts-node examples/amazon-search.ts",
 		"example:multi-tab": "ts-node examples/multi-tab.ts"
 	},
-	"files": ["dist", "README.md", "LICENSE"],
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
 	"keywords": [
 		"browser",
 		"automation",
@@ -28,6 +32,7 @@
 	"author": "Your Name",
 	"license": "MIT",
 	"dependencies": {
+		"browser-use-node": "^0.1.4",
 		"langchain": "^0.0.200",
 		"playwright": "^1.40.1",
 		"uuid": "^9.0.1",

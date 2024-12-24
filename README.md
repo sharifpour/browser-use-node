@@ -163,9 +163,6 @@ npm run format
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Dependencies
 
@@ -174,9 +171,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - uuid: ^9.0.1
 - zod: ^3.22.4
 
-## Author
 
-Your Name
 
 ## Keywords
 
