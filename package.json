@@ -1,6 +1,6 @@
 {
-	"name": "browser-use-js",
-	"version": "0.1.1",
+	"name": "browser-use-node",
+	"version": "0.1.2",
 	"description": "Browser automation powered by LLMs in JavaScript",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -14,7 +14,17 @@
 		"example:multi-tab": "ts-node examples/multi-tab.ts"
 	},
 	"files": ["dist", "README.md", "LICENSE"],
-	"keywords": ["browser", "automation", "llm", "ai", "playwright"],
+	"keywords": [
+		"browser",
+		"automation",
+		"llm",
+		"ai",
+		"playwright",
+		"node",
+		"browser-use",
+		"browser-use-node",
+		"browser-use-js"
+	],
 	"author": "Your Name",
 	"license": "MIT",
 	"dependencies": {
