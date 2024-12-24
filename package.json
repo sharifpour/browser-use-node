@@ -1,7 +1,7 @@
 {
-	"name": "browser-use",
+	"name": "browser-use-js",
 	"version": "0.1.0",
-	"description": "Browser automation powered by LLMs",
+	"description": "Browser automation powered by LLMs in JavaScript",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"scripts": {
