@@ -5,6 +5,8 @@
 import type { Locator, Page, BrowserContext as PlaywrightContext } from "playwright";
 import type { Browser } from "./browser";
 import type { BrowserSession, BrowserState, DOMElement } from "./types";
+import { writeFile } from 'node:fs/promises';
+import { createGif } from '../utils/gif';
 
 interface ElementLocation {
 	x: number;
@@ -174,6 +176,24 @@ export interface BrowserContextConfig {
 	 * Color scheme
 	 */
 	colorScheme?: "light" | "dark" | "no-preference";
+
+	/**
+	 * Whether to record a walkthrough GIF
+	 * @default false
+	 */
+	recordWalkthrough?: boolean;
+
+	/**
+	 * Path to save the walkthrough GIF
+	 * @default './walkthrough.gif'
+	 */
+	walkthroughPath?: string;
+
+	/**
+	 * Frame delay for walkthrough GIF (ms)
+	 * @default 1000
+	 */
+	walkthroughDelay?: number;
 }
 
 const defaultConfig: BrowserContextConfig = {
@@ -203,11 +223,24 @@ export class BrowserContext {
 			selectorMap: {},
 		},
 	};
+	private screenshots: Buffer[] = [];
 
 	constructor(browser: Browser, config: Partial<BrowserContextConfig> = {}) {
-		this.config = { ...defaultConfig, ...config };
+		this.config = {
+			...defaultConfig,
+			recordWalkthrough: false,
+			walkthroughPath: './walkthrough.gif',
+			walkthroughDelay: 1000,
+			...config
+		};
 		this.browser = browser;
-		// Initialize immediately without waiting
+
+		// Set longer default timeouts
+		if (this.context) {
+			this.context.setDefaultNavigationTimeout(10000);  // 10 seconds
+			this.context.setDefaultTimeout(5000);            // 5 seconds
+		}
+
 		void this.init();
 	}
 
@@ -278,6 +311,13 @@ export class BrowserContext {
 
 		// Optimize context after creation
 		await this.optimizeContext();
+
+		// Capture initial frame if recording enabled
+		if (this.config.recordWalkthrough) {
+			const page = await this.getPage();
+			await page.waitForTimeout(500);
+			await this.captureFrame();
+		}
 	}
 
 	private async optimizeContext(): Promise<void> {
@@ -324,10 +364,24 @@ export class BrowserContext {
 	 * Close the browser context
 	 */
 	async close(): Promise<void> {
-		if (this.context) {
-			await this.context.close();
-			this.context = null;
-			this.activePage = null;
+		try {
+			// Save walkthrough with timeout
+			await Promise.race([
+				this.saveWalkthrough(),
+				new Promise((_, reject) =>
+					setTimeout(() => reject(new Error('Walkthrough save timed out')), 120000)
+				)
+			]);
+		} catch (error) {
+			console.warn('Error during walkthrough save:', error);
+		} finally {
+			// Always clean up
+			this.screenshots = [];
+			if (this.context) {
+				await this.context.close();
+				this.context = null;
+				this.activePage = null;
+			}
 		}
 	}
 
@@ -335,34 +389,16 @@ export class BrowserContext {
 	 * Input text into an element
 	 */
 	async inputText(elementNode: DOMElement, text: string): Promise<void> {
+		const page = await this.getPage();
+
 		try {
-			const page = await this.getPage();
-			const element = await this.locateElement(elementNode);
-
-			if (!element) {
-				throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
-			}
-
-			// Wait for element to be ready
-			await element.waitFor({ state: 'visible', timeout: 5000 });
-			await element.scrollIntoViewIfNeeded();
-
-			// Clear and type text
-			await element.click();
-			await page.keyboard.press('Control+A');
-			await page.keyboard.press('Backspace');
-			await element.type(text, { delay: 50 });
-
-			// Handle Google search
-			if (page.url().includes('google.com')) {
-				await page.keyboard.press('Enter');
-				await Promise.race([
-					page.waitForLoadState('networkidle', { timeout: 5000 }),
-					page.waitForSelector('div.g', { timeout: 5000 })
-				]).catch(() => undefined);
-			}
+			await this.captureFrame(); // Before
+			await this.doInputText(elementNode, text);
+			await page.waitForTimeout(500); // Wait for visual changes
+			await this.captureFrame(); // After
 		} catch (error) {
-			throw new Error(`Failed to input text: ${(error as Error).message}`);
+			console.warn('Failed to capture input text frames:', error);
+			throw error;
 		}
 	}
 
@@ -371,74 +407,15 @@ export class BrowserContext {
 	 */
 	async clickElement(elementNode: DOMElement): Promise<void> {
 		const page = await this.getPage();
-		const element = await this.locateElement(elementNode);
-
-		if (!element) {
-			throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
-		}
 
 		try {
-			// Wait for element to be ready
-			await element.waitFor({ state: 'visible', timeout: 5000 });
-			await element.scrollIntoViewIfNeeded();
-
-			// Click strategies
-			const strategies = [
-				// Normal click
-				async (): Promise<void> => {
-					await element.click({ timeout: 5000 });
-				},
-				// JavaScript click via evaluate
-				async (): Promise<void> => {
-					const elementHandle = await element.elementHandle();
-					if (elementHandle) {
-						await page.evaluate(`
-							(element) => {
-								try {
-									// Try native click first
-									element.click();
-								} catch {
-									// Fallback to event dispatch
-									const event = new MouseEvent('click', {
-										bubbles: true,
-										cancelable: true,
-										view: window
-									});
-									element.dispatchEvent(event);
-								}
-							}
-						`, elementHandle);
-					}
-				},
-				// Mouse click at coordinates
-				async (): Promise<void> => {
-					const box = await element.boundingBox();
-					if (box) {
-						await page.mouse.click(
-							box.x + box.width / 2,
-							box.y + box.height / 2
-						);
-					}
-				}
-			];
-
-			let lastError: Error | undefined;
-			for (const strategy of strategies) {
-				try {
-					await strategy();
-					await page.waitForTimeout(100);
-					return;
-				} catch (e) {
-					lastError = e as Error;
-				}
-			}
-
-			if (lastError) {
-				throw lastError;
-			}
-
+			await this.captureFrame(); // Before
+			await this.doClickElement(elementNode);
+			await page.waitForTimeout(500); // Wait for visual changes
+			await this.captureFrame(); // After
 		} catch (error) {
-			throw new Error(`Failed to click element: ${(error as Error).message}`);
+			console.warn('Failed to capture click frames:', error);
+			throw error;
 		}
 	}
 
@@ -497,7 +474,7 @@ export class BrowserContext {
 					return element;
 				}
 			} catch {
-				// Skip to next strategy
+				// Failed strategy, try next one
 			}
 		}
 
@@ -657,13 +634,18 @@ export class BrowserContext {
 		try {
 			// Wait only for essential events in parallel
 			await Promise.all([
-				page.waitForLoadState('domcontentloaded'), // Don't wait for full load
+				page.waitForLoadState('domcontentloaded'),
 				page.waitForLoadState('networkidle', {
-					timeout: 100 // Very short network idle timeout
-				}).catch(() => {}) // Ignore network timeout
+					timeout: 100
+				}).catch(() => {})
 			]);
+
+			// Capture frame after navigation if recording enabled
+			if (this.config.recordWalkthrough) {
+				await page.waitForTimeout(500); // Wait for visual stability
+				await this.captureFrame();
+			}
 		} catch (error) {
-			// Log but continue if there are issues
 			console.debug("Load state warning:", error.message);
 		}
 	}
@@ -797,6 +779,184 @@ export class BrowserContext {
 					timeout: 100
 				}).catch(() => {})
 			]);
+		}
+	}
+
+	/**
+	 * Capture frame
+	 */
+	private async captureFrame(): Promise<void> {
+		if (!this.config.recordWalkthrough) return;
+
+		try {
+			const page = await this.getPage();
+
+			// Wait for any animations to settle
+			await page.waitForTimeout(100);
+
+			console.log('Capturing frame...');
+			const screenshot = await page.screenshot({
+				type: 'png',
+				fullPage: false,
+				animations: 'disabled',
+				timeout: 5000
+			});
+
+			this.screenshots.push(screenshot);
+			console.log(`Screenshot captured (total: ${this.screenshots.length})`);
+		} catch (error) {
+			console.warn('Failed to capture frame:', error);
+		}
+	}
+
+	/**
+	 * Save walkthrough
+	 */
+	async saveWalkthrough(): Promise<void> {
+		// Early return if no screenshots
+		if (!this.config.recordWalkthrough || this.screenshots.length === 0) {
+			console.log('No screenshots to process - skipping walkthrough creation');
+			return;
+		}
+
+		try {
+			console.log(`Creating GIF from ${this.screenshots.length} screenshots...`);
+
+			// Create GIF with timeout
+			const gifPromise = createGif(this.screenshots, {
+				delay: this.config.walkthroughDelay,
+				quality: 10,
+				repeat: 0,
+				timeout: 60000 // 1 minute timeout
+			});
+
+			// Add overall timeout
+			const timeoutPromise = new Promise<Buffer>((_, reject) =>
+				setTimeout(() => reject(new Error('Walkthrough save timed out')), 120000)
+			);
+
+			// Race between GIF creation and timeout
+			const gif = await Promise.race<Buffer>([gifPromise, timeoutPromise]);
+
+			const path = this.config.walkthroughPath;
+			console.log(`Writing GIF to ${path}...`);
+			await writeFile(path, gif);
+			console.log(`Saved walkthrough GIF to ${path}`);
+
+		} catch (error) {
+			console.warn('Error during walkthrough save:', error);
+		} finally {
+			// Always clean up
+			this.screenshots = [];
+		}
+	}
+
+	/**
+	 * Input text into an element
+	 */
+	private async doInputText(elementNode: DOMElement, text: string): Promise<void> {
+		try {
+			const page = await this.getPage();
+			const element = await this.locateElement(elementNode);
+
+			if (!element) {
+				throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
+			}
+
+			// Wait for element to be ready
+			await element.waitFor({ state: 'visible', timeout: 5000 });
+			await element.scrollIntoViewIfNeeded();
+
+			// Clear and type text
+			await element.click();
+			await page.keyboard.press('Control+A');
+			await page.keyboard.press('Backspace');
+			await element.type(text, { delay: 50 });
+
+			// Handle Google search
+			if (page.url().includes('google.com')) {
+				await page.keyboard.press('Enter');
+				await Promise.race([
+					page.waitForLoadState('networkidle', { timeout: 5000 }),
+					page.waitForSelector('div.g', { timeout: 5000 })
+				]).catch(() => undefined);
+			}
+		} catch (error) {
+			throw new Error(`Failed to input text: ${(error as Error).message}`);
+		}
+	}
+
+	/**
+	 * Click an element
+	 */
+	private async doClickElement(elementNode: DOMElement): Promise<void> {
+		const page = await this.getPage();
+		const element = await this.locateElement(elementNode);
+
+		if (!element) {
+			throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
+		}
+
+		try {
+			// Increase timeout for stability
+			await element.waitFor({
+				state: 'visible',
+				timeout: 10000  // Increase to 10 seconds
+			});
+			await element.scrollIntoViewIfNeeded({ timeout: 5000 });
+
+			// Click strategies with increased timeouts
+			const strategies = [
+				async (): Promise<void> => {
+					await element.click({
+						timeout: 5000,  // Increase click timeout
+						delay: 100,     // Add small delay before click
+						force: true     // Force click if needed
+					});
+				},
+				async (): Promise<void> => {
+					const elementHandle = await element.elementHandle();
+					if (elementHandle) {
+						await page.evaluate(`
+							(element) => {
+								try {
+									element.click();
+								} catch {
+									element.dispatchEvent(new MouseEvent('click', {
+										bubbles: true,
+										cancelable: true,
+										view: window
+									}));
+								}
+							}
+						`, elementHandle);
+					}
+				},
+				async (): Promise<void> => {
+					const box = await element.boundingBox();
+					if (box) {
+						await page.mouse.click(
+							box.x + box.width / 2,
+							box.y + box.height / 2
+						);
+					}
+				}
+			];
+
+			for (const strategy of strategies) {
+				try {
+					await strategy();
+					// Wait longer for navigation/stability
+					await page.waitForTimeout(500);
+					return;
+				} catch {
+					// Failed strategy, try next one
+				}
+			}
+
+			throw new Error('All click strategies failed');
+		} catch (error) {
+			throw new Error(`Failed to click element: ${(error as Error).message}`);
 		}
 	}
 }

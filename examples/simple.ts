@@ -27,6 +27,9 @@ async function main() {
     waitForNetworkIdlePageLoadTime: 0.2,
     maximumWaitPageLoadTime: 1.0,
     waitBetweenActions: 0.1,
+    recordWalkthrough: true,
+    walkthroughPath: './walkthrough.gif',
+    walkthroughDelay: 1000
   });
 
   console.log('Initializing LLM...');
@@ -52,11 +55,16 @@ async function main() {
     const result = await agent.run(5);
     console.log('Task completed:', result);
 
+    // Save walkthrough before closing
+    console.log('Saving walkthrough...');
+    await browserContext.saveWalkthrough();
     await browserContext.close();
   } catch (error) {
     console.error('Error:', error);
   } finally {
     console.log('Cleaning up...');
+    // Make sure to save walkthrough even if there was an error
+    await browserContext.saveWalkthrough();
     await browserContext.close();
     await browser.close();
   }

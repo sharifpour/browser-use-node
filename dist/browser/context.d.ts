@@ -129,6 +129,21 @@ export interface BrowserContextConfig {
      * Color scheme
      */
     colorScheme?: "light" | "dark" | "no-preference";
+    /**
+     * Whether to record a walkthrough GIF
+     * @default false
+     */
+    recordWalkthrough?: boolean;
+    /**
+     * Path to save the walkthrough GIF
+     * @default './walkthrough.gif'
+     */
+    walkthroughPath?: string;
+    /**
+     * Frame delay for walkthrough GIF (ms)
+     * @default 1000
+     */
+    walkthroughDelay?: number;
 }
 /**
  * Browser context with enhanced capabilities
@@ -139,6 +154,7 @@ export declare class BrowserContext {
     protected context: PlaywrightContext | null;
     private activePage;
     private session;
+    private screenshots;
     constructor(browser: Browser, config?: Partial<BrowserContextConfig>);
     /**
      * Initialize the browser context
@@ -225,4 +241,20 @@ export declare class BrowserContext {
      * Create a new tab
      */
     createNewTab(url?: string): Promise<void>;
+    /**
+     * Capture frame
+     */
+    private captureFrame;
+    /**
+     * Save walkthrough
+     */
+    saveWalkthrough(): Promise<void>;
+    /**
+     * Input text into an element
+     */
+    private doInputText;
+    /**
+     * Click an element
+     */
+    private doClickElement;
 }

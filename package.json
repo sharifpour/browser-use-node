@@ -1,6 +1,6 @@
 {
 	"name": "browser-use-node",
-	"version": "0.1.7",
+	"version": "0.1.8",
 	"description": "Browser automation powered by LLMs in JavaScript",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
@@ -31,6 +31,8 @@
 	"dependencies": {
 		"cheerio": "^1.0.0-rc.12",
 		"dotenv": "^16.4.7",
+		"gifencoder": "^2.0.1",
+		"sharp": "^0.33.2",
 		"langchain": "^0.0.200",
 		"playwright-core": "^1.40.1",
 		"chromium-bidi": "^0.4.32",
