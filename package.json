@@ -1,6 +1,6 @@
 {
 	"name": "browser-use-node",
-	"version": "0.1.6",
+	"version": "0.1.7",
 	"description": "Browser automation powered by LLMs in JavaScript",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
