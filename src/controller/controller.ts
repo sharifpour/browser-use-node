@@ -18,6 +18,7 @@ import type {
 	ScrollAction,
 	SearchGoogleAction,
 	SwitchTabAction,
+	GoBackAction,
 } from "./types";
 
 /**
@@ -86,7 +87,7 @@ export class Controller {
 		});
 
 		const goBackHandler: ActionHandler = async (
-			_params: any,
+			_params: GoBackAction,
 			browser: BrowserContext | undefined,
 		): Promise<ActionResult> => {
 			if (!browser) {
@@ -119,35 +120,23 @@ export class Controller {
 				throw new Error("Browser context is required for click_element action");
 			}
 
-			const session = await browser.getSession();
-			const state = session.cachedState;
-
-			if (!(params.index in state.selectorMap)) {
-				throw new Error(
-					`Element with index ${params.index} does not exist - retry or use alternative actions`,
-				);
-			}
-
-			const elementNode = state.selectorMap[params.index];
+			const page = await browser.getPage();
 			const initialPages = (await browser.getPages()).length;
 
-			// Check if element is a file uploader
-			if (await browser.isFileUploader(elementNode)) {
-				const msg = `Index ${params.index} - has an element which opens file upload dialog. To upload files please use a specific function to upload files`;
-				console.log(msg);
-				return {
-					success: true,
-					extractedContent: msg,
-					includeInMemory: true,
-				};
-			}
-
 			try {
-				await browser.clickElement(elementNode);
-				let msg = `🖱️  Clicked index ${params.index}`;
-				console.log(msg);
-				console.debug(`Element xpath: ${elementNode.xpath}`);
+				// Get viewport size for default click position
+				const viewport = page.viewportSize() || { width: 800, height: 600 };
 
+				// Use center of viewport if no coordinates provided
+				const x = params.x ?? Math.floor(viewport.width / 2);
+				const y = params.y ?? Math.floor(viewport.height / 2);
+
+				// Click at coordinates
+				await page.mouse.click(x, y);
+				let msg = `🖱️  Clicked at (${x}, ${y})`;
+				console.log(msg);
+
+				// Check if a new tab was opened
 				const currentPages = (await browser.getPages()).length;
 				if (currentPages > initialPages) {
 					const newTabMsg = "New tab opened - switching to it";
@@ -162,9 +151,7 @@ export class Controller {
 					includeInMemory: true,
 				};
 			} catch (error) {
-				console.warn(
-					`Element no longer available with index ${params.index} - most likely the page changed`,
-				);
+				console.warn(error.message);
 				return {
 					success: false,
 					error: error.message,
@@ -187,24 +174,31 @@ export class Controller {
 				throw new Error("Browser context is required for input_text action");
 			}
 
-			const session = await browser.getSession();
-			const state = session.cachedState;
+			const page = await browser.getPage();
 
-			if (!(params.index in state.selectorMap)) {
-				throw new Error(
-					`Element index ${params.index} does not exist - retry or use alternative actions`,
-				);
+			try {
+				// Press Enter after typing if it's a search
+				const isSearch = params.text.toLowerCase().includes('search') ||
+								page.url().includes('google.com') ||
+								page.url().includes('search');
+
+				await page.keyboard.type(params.text);
+
+				if (isSearch) {
+					await page.keyboard.press('Enter');
+				}
+
+				const msg = `⌨️  Typed "${params.text}"${isSearch ? ' and pressed Enter' : ''}`;
+				console.log(msg);
+
+				return {
+					isDone: false,
+					message: msg,
+					data: { text: params.text }
+				};
+			} catch (error) {
+				throw new Error(`Failed to input text: ${error.message}`);
 			}
-
-			const elementNode = state.selectorMap[params.index];
-			await browser.inputText(elementNode, params.text);
-			const msg = `⌨️  Input "${params.text}" into index ${params.index}`;
-			console.log(msg);
-			console.debug(`Element xpath: ${elementNode.xpath}`);
-			return {
-				extractedContent: msg,
-				includeInMemory: true,
-			};
 		};
 		inputTextHandler.requiresBrowser = true;
 
@@ -345,7 +339,7 @@ export class Controller {
 	 */
 	async executeAction(
 		actionName: string,
-		params: any,
+		params: SearchGoogleAction | GoToUrlAction | GoBackAction | ClickElementAction | InputTextAction | SwitchTabAction | OpenTabAction | ExtractPageContentAction | ScrollAction | DoneAction,
 		browser?: BrowserContext,
 	): Promise<ActionResult> {
 		const action = this.registry.get(actionName);

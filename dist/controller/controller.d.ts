@@ -3,6 +3,7 @@
  */
 import type { BrowserContext } from "../browser/context";
 import type { ActionResult } from "./registry";
+import type { ClickElementAction, DoneAction, ExtractPageContentAction, GoToUrlAction, InputTextAction, OpenTabAction, ScrollAction, SearchGoogleAction, SwitchTabAction, GoBackAction } from "./types";
 /**
  * Controller for browser actions
  */
@@ -16,5 +17,5 @@ export declare class Controller {
     /**
      * Execute an action
      */
-    executeAction(actionName: string, params: any, browser?: BrowserContext): Promise<ActionResult>;
+    executeAction(actionName: string, params: SearchGoogleAction | GoToUrlAction | GoBackAction | ClickElementAction | InputTextAction | SwitchTabAction | OpenTabAction | ExtractPageContentAction | ScrollAction | DoneAction, browser?: BrowserContext): Promise<ActionResult>;
 }

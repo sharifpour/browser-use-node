@@ -2,25 +2,35 @@
  * Agent prompts and templates
  */
 
+import type { AgentStepInfo } from "./types";
+import type { BrowserState } from "../browser/types";
+
 /**
  * System prompt for the agent
  */
 export class SystemPrompt {
-	private readonly actionDescription: string;
-	private readonly currentDate: Date;
-	private readonly maxActionsPerStep: number;
-
-	constructor(actionDescription: string, maxActionsPerStep = 10) {
-		this.actionDescription = actionDescription;
-		this.currentDate = new Date();
-		this.maxActionsPerStep = maxActionsPerStep;
-	}
+	constructor(
+		private readonly promptConfig: {
+			useVision?: boolean;
+			includeMemory?: boolean;
+			maxActionsPerStep?: number;
+		} = {
+			maxActionsPerStep: 10
+		}
+	) {}
 
 	/**
-	 * Convert the prompt to a string
+	 * Get the system prompt
 	 */
-	toString(): string {
+	getPrompt(
+		browserState: BrowserState,
+		stepInfo: AgentStepInfo,
+		task: string,
+		memory?: string
+	): string {
 		return `
+You are a web browser automation agent. Your task is to help users accomplish their goals by interacting with web pages.
+
 ${this.taskDescription()}
 
 ${this.importantRules()}
@@ -29,9 +39,63 @@ ${this.inputFormat()}
 
 ${this.availableActions()}
 
-Current date and time: ${this.currentDate.toLocaleString()}
-Task: ${this.actionDescription}
-    `.trim();
+${this.promptConfig.useVision ? this.visionCapabilities() : ""}
+
+CURRENT STATE:
+Step ${stepInfo.step_number} of ${stepInfo.max_steps}
+URL: ${browserState.url}
+Title: ${browserState.title}
+Task: ${task}
+
+${this.promptConfig.includeMemory && memory ? `MEMORY:\n${memory}\n` : ""}
+
+Respond in the following format:
+{
+	"current_state": {
+		"evaluation_previous_goal": "Evaluation of what was accomplished in the previous step",
+		"memory": "Key information to remember",
+		"next_goal": "Next immediate goal to accomplish"
+	},
+	"action": [
+		{
+			"action_name": {
+				"param1": "value1",
+				"param2": "value2"
+			}
+		}
+	]
+}`.trim();
+	}
+
+	/**
+	 * Vision capabilities description
+	 */
+	private visionCapabilities(): string {
+		return `
+VISION CAPABILITIES:
+- You can see and analyze visual elements on the page
+- Screenshots are provided with labeled elements
+- You can identify UI elements by their visual appearance
+- You can understand spatial relationships between elements
+`.trim();
+	}
+
+	/**
+	 * Convert the prompt to a string
+	 */
+	toString(): string {
+		return this.getPrompt(
+			{
+				url: "",
+				title: "",
+				content: "",
+			},
+			{
+				step_number: 0,
+				max_steps: 0,
+			},
+			"No task specified"
+		);
 	}
 
 	/**
@@ -122,7 +186,7 @@ IMPORTANT RULES:
    - Only provide the action sequence until you think the page will change.
    - Try to be efficient, e.g. fill forms at once, or chain actions where nothing changes on the page like saving, extracting, checkboxes...
    - only use multiple actions if it makes sense.
-   - use maximum ${this.maxActionsPerStep} actions per sequence`.trim();
+   - use maximum ${this.promptConfig.maxActionsPerStep ?? 10} actions per sequence`.trim();
 	}
 
 	/**

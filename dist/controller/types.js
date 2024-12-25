@@ -12,8 +12,10 @@ exports.GoToUrlActionSchema = zod_1.z.object({
     url: zod_1.z.string(),
 });
 exports.ClickElementActionSchema = zod_1.z.object({
-    index: zod_1.z.number(),
+    index: zod_1.z.number().optional(),
     xpath: zod_1.z.string().optional(),
+    x: zod_1.z.number().optional(),
+    y: zod_1.z.number().optional(),
 });
 exports.InputTextActionSchema = zod_1.z.object({
     index: zod_1.z.number(),

@@ -50,7 +50,7 @@ class Registry {
     registerFromClass(target) {
         const actions = target.constructor._actions;
         if (actions) {
-            for (const [_, registration] of actions) {
+            for (const [, registration] of actions) {
                 this.registerAction(registration);
             }
         }

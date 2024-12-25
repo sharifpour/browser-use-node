@@ -8,10 +8,10 @@ const zod_1 = require("zod");
 exports.BrowserConfigSchema = zod_1.z.object({
     /** Whether to run the browser in headless mode */
     headless: zod_1.z.boolean().optional().default(false),
-    /** Whether to keep the browser open after completion */
-    keepOpen: zod_1.z.boolean().optional().default(false),
     /** Whether to disable browser security features */
-    disableSecurity: zod_1.z.boolean().optional().default(false),
+    disableSecurity: zod_1.z.boolean().optional().default(true),
+    /** Additional Chromium arguments */
+    extraChromiumArgs: zod_1.z.array(zod_1.z.string()).optional(),
     /** Path to cookies file for persistence */
     cookiesFile: zod_1.z.string().optional(),
     /** Minimum time to wait for page load in milliseconds */
@@ -20,6 +20,29 @@ exports.BrowserConfigSchema = zod_1.z.object({
     waitForNetworkIdlePageLoadTime: zod_1.z.number().optional().default(1000),
     /** Maximum time to wait for page load in milliseconds */
     maximumWaitPageLoadTime: zod_1.z.number().optional().default(5000),
+    /** Recording configuration */
+    recording: zod_1.z.object({
+        /** Whether recording is enabled */
+        enabled: zod_1.z.boolean(),
+        /** Path to recording file */
+        path: zod_1.z.string(),
+        /** Recording options */
+        options: zod_1.z.record(zod_1.z.unknown()).optional()
+    }).optional(),
+    /** Trace configuration */
+    trace: zod_1.z.object({
+        /** Whether tracing is enabled */
+        enabled: zod_1.z.boolean(),
+        /** Path to trace file */
+        path: zod_1.z.string()
+    }).optional(),
+    /** Viewport configuration */
+    viewport: zod_1.z.object({
+        /** Viewport width */
+        width: zod_1.z.number(),
+        /** Viewport height */
+        height: zod_1.z.number()
+    }).optional()
 });
 /**
  * Agent configuration schema with validation

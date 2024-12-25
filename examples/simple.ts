@@ -6,13 +6,13 @@ import { Agent, Browser } from "../dist";
 config();
 
 async function main() {
-  // Initialize the browser
+  console.log('Starting browser...');
   const browser = new Browser({
     headless: false,
     disableSecurity: true
   });
 
-  // Create browser context
+  console.log('Creating browser context...');
   const browserContext = await browser.newContext({
     viewport: {
       width: 1280,
@@ -20,27 +20,29 @@ async function main() {
     }
   });
 
-  // Initialize the LLM
+  console.log('Initializing LLM...');
   const llm = new ChatOpenAI({
     modelName: "gpt-4",
     temperature: 0,
   });
 
-  // Create an agent with a specific task
+  console.log('Creating agent...');
   const agent = new Agent({
-    task: "Go to Amazon.com and search for 'mechanical keyboard'. Find a keyboard under $100 with good reviews and extract its details.",
+    task: "Go to google.com and search for 'weather today'",
     llm,
     useVision: true,
     browser,
-    browserContext, // Pass the browser context
+    browserContext,
   });
 
   try {
-    const result = await agent.run(5);
+    console.log('Running agent...');
+    const result = await agent.run(3);
     console.log('Task completed:', result);
   } catch (error) {
     console.error('Error:', error);
   } finally {
+    console.log('Cleaning up...');
     await browserContext.close();
     await browser.close();
   }

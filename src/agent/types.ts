@@ -3,10 +3,10 @@
  */
 
 import type { BrowserState } from "../browser/types";
-import type { ActionResult } from "../controller/types";
+import type { BrowserContextConfig } from "../browser/context";
 
 /**
- * Agent brain - current state of the agent
+ * Agent brain - matches Python's AgentBrain model
  */
 export interface AgentBrain {
 	/**
@@ -26,16 +26,38 @@ export interface AgentBrain {
 }
 
 /**
- * Agent output
+ * Action result - matches Python's ActionResult model
  */
-export interface AgentOutput {
-	status: "success" | "error";
-	message: string;
-	data: unknown;
+export interface ActionResult {
+	is_done?: boolean;
+	extracted_content?: string;
+	error?: string;
+	include_in_memory: boolean;
 }
 
 /**
- * Agent configuration
+ * Agent history - matches Python's AgentHistory
+ */
+export interface AgentHistory {
+	step_number: number;
+	browser_state: BrowserState;
+	model_output: AgentOutput;
+	action_result: ActionResult;
+	timestamp: number;
+}
+
+/**
+ * Agent output - matches Python's AgentOutput
+ */
+export interface AgentOutput {
+	current_state: AgentBrain;
+	action: Array<{
+		[key: string]: Record<string, unknown>;
+	}>;
+}
+
+/**
+ * Agent configuration - enhanced to match Python capabilities
  */
 export interface AgentConfig {
 	/**
@@ -102,117 +124,83 @@ export interface AgentConfig {
 	 * Delay between retries in seconds
 	 */
 	retryDelay?: number;
+
+	/**
+	 * Browser configuration
+	 */
+	browserConfig?: {
+		headless?: boolean;
+		disableSecurity?: boolean;
+		extraChromiumArgs?: string[];
+		newContextConfig?: BrowserContextConfig;
+		tracePath?: string;
+		recordingPath?: string;
+	};
+
+	/**
+	 * Telemetry configuration
+	 */
+	telemetry?: {
+		enabled: boolean;
+		provider: "posthog" | "custom";
+		options?: Record<string, unknown>;
+	};
+
+	/**
+	 * Vision configuration
+	 */
+	vision?: {
+		enabled: boolean;
+		model?: string;
+		maxTokens?: number;
+	};
 }
 
 /**
- * Agent status
- */
-export type AgentStatus = "idle" | "running" | "done" | "error";
-
-/**
- * Agent state
- */
-export interface AgentState {
-	/**
-	 * Current status
-	 */
-	status: AgentStatus;
-
-	/**
-	 * Current step number
-	 */
-	currentStep: number;
-
-	/**
-	 * Total steps executed
-	 */
-	totalSteps: number;
-
-	/**
-	 * Error message if any
-	 */
-	error?: string;
-
-	/**
-	 * Browser state
-	 */
-	browserState: BrowserState;
-}
-
-/**
- * Agent message
- */
-export interface AgentMessage {
-	/**
-	 * Message role
-	 */
-	role: "system" | "user" | "assistant";
-
-	/**
-	 * Message content
-	 */
-	content: string;
-}
-
-/**
- * Agent history entry
- */
-export interface AgentHistory {
-	/**
-	 * Step number
-	 */
-	step: number;
-
-	/**
-	 * Browser state
-	 */
-	browserState: BrowserState;
-
-	/**
-	 * Action result
-	 */
-	actionResult: ActionResult;
-
-	/**
-	 * Timestamp
-	 */
-	timestamp: number;
-}
-
-/**
- * Agent step information
+ * Agent step info - matches Python's AgentStepInfo
  */
 export interface AgentStepInfo {
-	/**
-	 * Step number
-	 */
-	step: number;
-
-	/**
-	 * Browser state
-	 */
-	browserState: BrowserState;
-
-	/**
-	 * Action result
-	 */
-	actionResult: ActionResult;
+	step_number: number;
+	max_steps: number;
 }
 
 /**
- * Agent error
+ * Agent error types - enhanced error handling
  */
 export class AgentError extends Error {
-	constructor(message: string) {
+	constructor(
+		message: string,
+		public readonly type: "validation" | "execution" | "browser" | "llm" = "execution"
+	) {
 		super(message);
 		this.name = "AgentError";
 	}
 }
 
 /**
- * Browser state history
+ * Agent status enum
  */
-export interface BrowserStateHistory {
-	states: BrowserState[];
-	timestamps: number[];
+export enum AgentStatus {
+	IDLE = 'idle',
+	RUNNING = 'running',
+	COMPLETED = 'completed',
+	FAILED = 'failed'
+}
+
+/**
+ * Agent state interface
+ */
+export interface AgentState {
+	status: AgentStatus;
+	currentStep: number;
+	history: AgentHistory[];
+}
+
+/**
+ * Agent message interface
+ */
+export interface AgentMessage {
+	type: 'info' | 'error' | 'success';
+	content: string;
+	timestamp: number;
 }

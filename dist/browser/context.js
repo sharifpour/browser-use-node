@@ -72,6 +72,9 @@ class BrowserContext {
         if (!this.context) {
             await this.init();
         }
+        if (!this.context) {
+            throw new Error("Failed to initialize browser context");
+        }
         if (!this.activePage) {
             this.activePage = await this.context.newPage();
         }

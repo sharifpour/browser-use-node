@@ -3,46 +3,10 @@
  */
 
 import type { BrowserContext } from "../browser/context";
-
-export interface ActionResult {
-	/**
-	 * Whether the action was successful
-	 */
-	success?: boolean;
-
-	/**
-	 * Message describing the result
-	 */
-	message?: string;
-
-	/**
-	 * Content extracted from the action
-	 */
-	extractedContent?: string;
-
-	/**
-	 * Whether to include the result in memory
-	 */
-	includeInMemory?: boolean;
-
-	/**
-	 * Additional data from the action
-	 */
-	data?: any;
-
-	/**
-	 * Whether the action is done
-	 */
-	isDone?: boolean;
-
-	/**
-	 * Error message if the action failed
-	 */
-	error?: string;
-}
+import type { ActionParams, ActionResult } from "./types";
 
 export type ActionHandler = {
-	(params: any, browser: BrowserContext | undefined): Promise<ActionResult>;
+	(params: ActionParams, browser: BrowserContext | undefined): Promise<ActionResult>;
 	requiresBrowser?: boolean;
 };
 
@@ -57,7 +21,11 @@ export interface ActionRegistration {
  * Decorator for registering actions
  */
 export function action(description: string, requiresBrowser = false) {
-	return (target: any, propertyKey: string, descriptor: PropertyDescriptor) => {
+	return (
+		target: { constructor: { _actions: Map<string, ActionRegistration> } },
+		propertyKey: string,
+		descriptor: PropertyDescriptor,
+	) => {
 		const originalMethod = descriptor.value;
 		if (!target.constructor._actions) {
 			target.constructor._actions = new Map<string, ActionRegistration>();
@@ -99,10 +67,10 @@ export class Registry {
 	/**
 	 * Register actions from a class
 	 */
-	registerFromClass(target: any): void {
+	registerFromClass(target: { constructor: { _actions: Map<string, ActionRegistration> } }): void {
 		const actions = target.constructor._actions;
 		if (actions) {
-			for (const [_, registration] of actions) {
+			for (const [, registration] of actions) {
 				this.registerAction(registration);
 			}
 		}
@@ -143,3 +111,5 @@ export class Registry {
 		this.actions.clear();
 	}
 }
+
+export type { ActionResult } from "./types";

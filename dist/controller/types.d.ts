@@ -25,7 +25,7 @@ export interface ActionResult {
     /**
      * Additional data from the action
      */
-    data?: any;
+    data?: unknown;
     /**
      * Whether the action is done
      */
@@ -53,14 +53,20 @@ export declare const GoToUrlActionSchema: z.ZodObject<{
     url?: string;
 }>;
 export declare const ClickElementActionSchema: z.ZodObject<{
-    index: z.ZodNumber;
+    index: z.ZodOptional<z.ZodNumber>;
     xpath: z.ZodOptional<z.ZodString>;
+    x: z.ZodOptional<z.ZodNumber>;
+    y: z.ZodOptional<z.ZodNumber>;
 }, "strip", z.ZodTypeAny, {
     index?: number;
     xpath?: string;
+    x?: number;
+    y?: number;
 }, {
     index?: number;
     xpath?: string;
+    x?: number;
+    y?: number;
 }>;
 export declare const InputTextActionSchema: z.ZodObject<{
     index: z.ZodNumber;
@@ -123,6 +129,9 @@ export declare const SendKeysActionSchema: z.ZodObject<{
     keys?: string;
     index?: number;
 }>;
+export interface GoBackAction {
+    type: "go_back";
+}
 /**
  * Action types
  */
@@ -136,3 +145,7 @@ export type OpenTabAction = z.infer<typeof OpenTabActionSchema>;
 export type ExtractPageContentAction = z.infer<typeof ExtractPageContentActionSchema>;
 export type ScrollAction = z.infer<typeof ScrollActionSchema>;
 export type SendKeysAction = z.infer<typeof SendKeysActionSchema>;
+/**
+ * Union type of all possible action parameters
+ */
+export type ActionParams = SearchGoogleAction | GoToUrlAction | GoBackAction | ClickElementAction | InputTextAction | SwitchTabAction | OpenTabAction | ExtractPageContentAction | ScrollAction | SendKeysAction | DoneAction;

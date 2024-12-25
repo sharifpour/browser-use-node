@@ -5,36 +5,33 @@ import { Agent } from "../dist";
 // Load environment variables
 config();
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-if (!OPENAI_API_KEY) {
-	throw new Error("OPENAI_API_KEY environment variable is required");
-}
-
 async function main() {
 	// Initialize the LLM
 	const llm = new ChatOpenAI({
-		modelName: "gpt-4o",
-		openAIApiKey: OPENAI_API_KEY,
-    maxTokens: 500,
+    modelName: "gpt-4",
 		temperature: 0,
 	});
 
-	// Create and run the agent
+  // Create an agent with a multi-tab task
 	const agent = new Agent({
-		task: "Search Ukraine in Google",
+    task: `
+			1. Open Amazon.com and search for 'gaming mouse'
+			2. In a new tab, open BestBuy.com and search for the same product
+			3. Compare prices and reviews of similar models
+			4. Find the best deal between the two sites
+		`,
 		llm,
+    useVision: true
 	});
 
 	try {
-		const result = await agent.run(5); // Allow more steps for multi-tab operations
-		console.log("Agent result:", result);
+    // Run the agent with maxSteps
+    const result = await agent.run(8);
+    console.log('Task completed:', result);
 	} catch (error) {
-		console.error("Error running agent:", error);
+    console.error('Error:', error);
 	}
 }
 
 // Run the example
-main().catch((error) => {
-	console.error("Unhandled error:", error);
-	process.exit(1);
-});
+main().catch(console.error);

@@ -18,7 +18,7 @@ yarn-error.log*
 .env
 .env.local
 
-bun.lockb
+browser-use-main-git/
 
 # OS
 .DS_Store
@@ -26,4 +26,6 @@ Thumbs.db
 
 browser-use-main-git/
 
-browser-use-main-git
+original-souurce
+original-source/
+dist/

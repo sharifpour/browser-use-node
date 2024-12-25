@@ -5,10 +5,10 @@ import { z } from "zod";
 export declare const BrowserConfigSchema: z.ZodObject<{
     /** Whether to run the browser in headless mode */
     headless: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
-    /** Whether to keep the browser open after completion */
-    keepOpen: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
     /** Whether to disable browser security features */
     disableSecurity: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+    /** Additional Chromium arguments */
+    extraChromiumArgs: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
     /** Path to cookies file for persistence */
     cookiesFile: z.ZodOptional<z.ZodString>;
     /** Minimum time to wait for page load in milliseconds */
@@ -17,22 +17,91 @@ export declare const BrowserConfigSchema: z.ZodObject<{
     waitForNetworkIdlePageLoadTime: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
     /** Maximum time to wait for page load in milliseconds */
     maximumWaitPageLoadTime: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
+    /** Recording configuration */
+    recording: z.ZodOptional<z.ZodObject<{
+        /** Whether recording is enabled */
+        enabled: z.ZodBoolean;
+        /** Path to recording file */
+        path: z.ZodString;
+        /** Recording options */
+        options: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+    }, "strip", z.ZodTypeAny, {
+        path?: string;
+        options?: Record<string, unknown>;
+        enabled?: boolean;
+    }, {
+        path?: string;
+        options?: Record<string, unknown>;
+        enabled?: boolean;
+    }>>;
+    /** Trace configuration */
+    trace: z.ZodOptional<z.ZodObject<{
+        /** Whether tracing is enabled */
+        enabled: z.ZodBoolean;
+        /** Path to trace file */
+        path: z.ZodString;
+    }, "strip", z.ZodTypeAny, {
+        path?: string;
+        enabled?: boolean;
+    }, {
+        path?: string;
+        enabled?: boolean;
+    }>>;
+    /** Viewport configuration */
+    viewport: z.ZodOptional<z.ZodObject<{
+        /** Viewport width */
+        width: z.ZodNumber;
+        /** Viewport height */
+        height: z.ZodNumber;
+    }, "strip", z.ZodTypeAny, {
+        width?: number;
+        height?: number;
+    }, {
+        width?: number;
+        height?: number;
+    }>>;
 }, "strip", z.ZodTypeAny, {
     headless?: boolean;
-    keepOpen?: boolean;
     disableSecurity?: boolean;
+    extraChromiumArgs?: string[];
     cookiesFile?: string;
     minimumWaitPageLoadTime?: number;
     waitForNetworkIdlePageLoadTime?: number;
     maximumWaitPageLoadTime?: number;
+    recording?: {
+        path?: string;
+        options?: Record<string, unknown>;
+        enabled?: boolean;
+    };
+    trace?: {
+        path?: string;
+        enabled?: boolean;
+    };
+    viewport?: {
+        width?: number;
+        height?: number;
+    };
 }, {
     headless?: boolean;
-    keepOpen?: boolean;
     disableSecurity?: boolean;
+    extraChromiumArgs?: string[];
     cookiesFile?: string;
     minimumWaitPageLoadTime?: number;
     waitForNetworkIdlePageLoadTime?: number;
     maximumWaitPageLoadTime?: number;
+    recording?: {
+        path?: string;
+        options?: Record<string, unknown>;
+        enabled?: boolean;
+    };
+    trace?: {
+        path?: string;
+        enabled?: boolean;
+    };
+    viewport?: {
+        width?: number;
+        height?: number;
+    };
 }>;
 export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
 /**
@@ -47,10 +116,10 @@ export declare const AgentConfigSchema: z.ZodObject<{
     browserConfig: z.ZodOptional<z.ZodObject<{
         /** Whether to run the browser in headless mode */
         headless: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
-        /** Whether to keep the browser open after completion */
-        keepOpen: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
         /** Whether to disable browser security features */
         disableSecurity: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;
+        /** Additional Chromium arguments */
+        extraChromiumArgs: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
         /** Path to cookies file for persistence */
         cookiesFile: z.ZodOptional<z.ZodString>;
         /** Minimum time to wait for page load in milliseconds */
@@ -59,46 +128,141 @@ export declare const AgentConfigSchema: z.ZodObject<{
         waitForNetworkIdlePageLoadTime: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
         /** Maximum time to wait for page load in milliseconds */
         maximumWaitPageLoadTime: z.ZodDefault<z.ZodOptional<z.ZodNumber>>;
+        /** Recording configuration */
+        recording: z.ZodOptional<z.ZodObject<{
+            /** Whether recording is enabled */
+            enabled: z.ZodBoolean;
+            /** Path to recording file */
+            path: z.ZodString;
+            /** Recording options */
+            options: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
+        }, "strip", z.ZodTypeAny, {
+            path?: string;
+            options?: Record<string, unknown>;
+            enabled?: boolean;
+        }, {
+            path?: string;
+            options?: Record<string, unknown>;
+            enabled?: boolean;
+        }>>;
+        /** Trace configuration */
+        trace: z.ZodOptional<z.ZodObject<{
+            /** Whether tracing is enabled */
+            enabled: z.ZodBoolean;
+            /** Path to trace file */
+            path: z.ZodString;
+        }, "strip", z.ZodTypeAny, {
+            path?: string;
+            enabled?: boolean;
+        }, {
+            path?: string;
+            enabled?: boolean;
+        }>>;
+        /** Viewport configuration */
+        viewport: z.ZodOptional<z.ZodObject<{
+            /** Viewport width */
+            width: z.ZodNumber;
+            /** Viewport height */
+            height: z.ZodNumber;
+        }, "strip", z.ZodTypeAny, {
+            width?: number;
+            height?: number;
+        }, {
+            width?: number;
+            height?: number;
+        }>>;
     }, "strip", z.ZodTypeAny, {
         headless?: boolean;
-        keepOpen?: boolean;
         disableSecurity?: boolean;
+        extraChromiumArgs?: string[];
         cookiesFile?: string;
         minimumWaitPageLoadTime?: number;
         waitForNetworkIdlePageLoadTime?: number;
         maximumWaitPageLoadTime?: number;
+        recording?: {
+            path?: string;
+            options?: Record<string, unknown>;
+            enabled?: boolean;
+        };
+        trace?: {
+            path?: string;
+            enabled?: boolean;
+        };
+        viewport?: {
+            width?: number;
+            height?: number;
+        };
     }, {
         headless?: boolean;
-        keepOpen?: boolean;
         disableSecurity?: boolean;
+        extraChromiumArgs?: string[];
         cookiesFile?: string;
         minimumWaitPageLoadTime?: number;
         waitForNetworkIdlePageLoadTime?: number;
         maximumWaitPageLoadTime?: number;
+        recording?: {
+            path?: string;
+            options?: Record<string, unknown>;
+            enabled?: boolean;
+        };
+        trace?: {
+            path?: string;
+            enabled?: boolean;
+        };
+        viewport?: {
+            width?: number;
+            height?: number;
+        };
     }>>;
 }, "strip", z.ZodTypeAny, {
     task?: string;
     model?: string;
     browserConfig?: {
         headless?: boolean;
-        keepOpen?: boolean;
         disableSecurity?: boolean;
+        extraChromiumArgs?: string[];
         cookiesFile?: string;
         minimumWaitPageLoadTime?: number;
         waitForNetworkIdlePageLoadTime?: number;
         maximumWaitPageLoadTime?: number;
+        recording?: {
+            path?: string;
+            options?: Record<string, unknown>;
+            enabled?: boolean;
+        };
+        trace?: {
+            path?: string;
+            enabled?: boolean;
+        };
+        viewport?: {
+            width?: number;
+            height?: number;
+        };
     };
 }, {
     task?: string;
     model?: string;
     browserConfig?: {
         headless?: boolean;
-        keepOpen?: boolean;
         disableSecurity?: boolean;
+        extraChromiumArgs?: string[];
         cookiesFile?: string;
         minimumWaitPageLoadTime?: number;
         waitForNetworkIdlePageLoadTime?: number;
         maximumWaitPageLoadTime?: number;
+        recording?: {
+            path?: string;
+            options?: Record<string, unknown>;
+            enabled?: boolean;
+        };
+        trace?: {
+            path?: string;
+            enabled?: boolean;
+        };
+        viewport?: {
+            width?: number;
+            height?: number;
+        };
     };
 }>;
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
@@ -141,4 +305,22 @@ export interface AgentHistory {
     success: boolean;
     /** Additional details about the action */
     details?: Record<string, unknown>;
+}
+/**
+ * Main content extractor configuration
+ */
+export interface ContentExtractorConfig {
+    /** Whether the extractor is enabled */
+    enabled: boolean;
+    /** Mode of extraction */
+    mode: "text" | "markdown" | "html";
+    /** Options for the extractor */
+    options?: {
+        /** Whether to include images */
+        includeImages?: boolean;
+        /** Maximum length of extracted content */
+        maxLength?: number;
+        /** Whether to remove ads */
+        removeAds?: boolean;
+    };
 }

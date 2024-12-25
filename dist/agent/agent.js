@@ -9,47 +9,11 @@ const browser_1 = require("../browser");
 const controller_1 = require("../controller");
 const message_manager_1 = require("./message-manager");
 const prompts_1 = require("./prompts");
-const defaultConfig = {
-    task: "",
-    model: "gpt-4",
-    maxSteps: 3,
-    maxActionsPerStep: 10,
-    maxFailures: 5,
-    useVision: true,
-    saveHistory: false,
-    historyPath: undefined,
-    maxInputTokens: 1000,
-    validateOutput: false,
-    includeAttributes: [
-        "title",
-        "type",
-        "name",
-        "role",
-        "tabindex",
-        "aria-label",
-        "placeholder",
-        "value",
-        "alt",
-        "aria-expanded",
-    ],
-    maxErrorLength: 400,
-    retryDelay: 10,
-};
-/**
- * Estimate the number of tokens in a string
- * This is a rough estimate based on GPT tokenization rules
- */
+const MAX_TOKENS = 4000; // Default max tokens
+const CHARS_PER_TOKEN = 4; // Approximate chars per token
 function estimateTokens(text) {
-    // Split on whitespace and punctuation
-    const words = text.split(/[\s\p{P}]+/u).filter(Boolean);
-    // Count special tokens (uppercase words, numbers, and non-ASCII characters)
-    const specialTokens = (text.match(/[A-Z]{2,}|\d+|[^\x20-\x7E]/g)?.length || 0);
-    // Base estimate: words + special tokens + some overhead
-    return words.length + specialTokens + Math.ceil(text.length / 100);
+    return Math.ceil(text.length / CHARS_PER_TOKEN);
 }
-/**
- * Extract text content from LangChain message content
- */
 function getMessageText(content) {
     if (typeof content === 'string') {
         return content;
@@ -57,83 +21,59 @@ function getMessageText(content) {
     if (Array.isArray(content)) {
         return content
             .map(item => {
-            if (typeof item === 'string') {
+            if (typeof item === 'string')
                 return item;
-            }
-            if (item && typeof item === 'object') {
-                if ('text' in item && typeof item.text === 'string') {
-                    return item.text;
-                }
-                if ('image_url' in item) {
-                    return ''; // Skip image URLs in token count
-                }
+            if (item && typeof item === 'object' && 'text' in item) {
+                return String(item.text);
             }
             return '';
         })
-            .join(' ');
+            .join('\n');
     }
-    return '';
+    return JSON.stringify(content);
 }
-/**
- * Clean the LLM response by removing markdown code blocks and other formatting
- */
 function cleanLLMResponse(text) {
-    // Remove markdown code blocks and whitespace
-    return text
-        .replace(/```(?:json)?\n/g, '')
-        .replace(/\n```/g, '')
-        .trim();
+    // Remove any markdown code block syntax
+    const cleanedText = text.replace(/```json\s*|\s*```/g, '');
+    // Ensure the text is valid JSON
+    try {
+        JSON.parse(cleanedText);
+        return cleanedText;
+    }
+    catch {
+        // If not valid JSON, try to extract JSON portion
+        const match = cleanedText.match(/\{[\s\S]*\}/);
+        return match ? match[0] : cleanedText;
+    }
 }
-/**
- * Browser automation agent powered by LLMs
- */
 class Agent {
     constructor(config) {
-        this.browser = null;
-        this.browserContext = null;
         this.lastResult = null;
         this.ownsBrowser = false;
         this.ownsBrowserContext = false;
-        this.config = {
-            ...defaultConfig,
-            task: config.task,
-            useVision: config.useVision ?? defaultConfig.useVision,
-            maxFailures: config.maxFailures ?? defaultConfig.maxFailures,
-            retryDelay: config.retryDelay ?? defaultConfig.retryDelay,
-            maxInputTokens: config.maxInputTokens ?? defaultConfig.maxInputTokens,
-            validateOutput: config.validateOutput ?? defaultConfig.validateOutput,
-            includeAttributes: config.includeAttributes ?? defaultConfig.includeAttributes,
-            maxErrorLength: config.maxErrorLength ?? defaultConfig.maxErrorLength,
-            maxActionsPerStep: config.maxActionsPerStep ?? defaultConfig.maxActionsPerStep,
-        };
-        this.llm = config.llm;
+        this.config = config;
+        this.browserInstance = config.browser;
+        this.browserContextInstance = config.browserContext;
         this.controller = config.controller ?? new controller_1.Controller();
         this.messageManager = new message_manager_1.MessageManager();
-        this.systemPrompt = new prompts_1.SystemPrompt(config.task, this.config.maxActionsPerStep);
-        if (config.browser) {
-            this.browser = config.browser;
-        }
-        if (config.browserContext) {
-            this.browserContext = config.browserContext;
-        }
+        this.systemPrompt = new prompts_1.SystemPrompt({
+            useVision: config.useVision,
+            includeMemory: true,
+            maxActionsPerStep: config.maxActionsPerStep
+        });
     }
-    /**
-     * Run the agent with the given task
-     */
     async run(maxSteps = 3) {
         try {
-            // Initialize browser if needed
-            if (!this.browserContext) {
-                if (!this.browser) {
-                    this.browser = new browser_1.Browser();
+            if (!this.browserContextInstance) {
+                if (!this.browserInstance) {
+                    this.browserInstance = new browser_1.Browser();
                     this.ownsBrowser = true;
                 }
-                this.browserContext = await this.browser.newContext();
+                this.browserContextInstance = await this.browserInstance.newContext();
                 this.ownsBrowserContext = true;
             }
-            // Initialize system prompt
-            await this.messageManager.addMessage(new schema_1.SystemMessage(this.systemPrompt.toString()));
-            // Run steps
+            const browserState = await this.browserContextInstance.getState();
+            await this.messageManager.addMessage(new schema_1.SystemMessage(this.systemPrompt.getPrompt(browserState, { step_number: 1, max_steps: maxSteps }, this.config.task)));
             let step = 1;
             while (step <= maxSteps) {
                 const result = await this.runStep(step);
@@ -142,130 +82,100 @@ class Agent {
                 }
                 step++;
             }
-            return {
-                status: "success",
+            return this.createSuccessOutput({
                 message: "Reached maximum steps",
-                data: this.lastResult,
-            };
+                data: this.lastResult
+            });
         }
         catch (error) {
-            return {
-                status: "error",
-                message: error instanceof Error ? error.message : "Unknown error",
-                data: null,
-            };
+            return this.createErrorOutput(error instanceof Error ? error.message : "Unknown error");
         }
         finally {
             await this.cleanup();
         }
     }
-    /**
-     * Run a single step of the agent
-     */
     async runStep(step) {
-        if (!this.browserContext) {
+        if (!this.browserContextInstance) {
             throw new Error("Browser context not initialized");
         }
         try {
-            // Get current browser state
-            const state = await this.browserContext.getState(this.config.useVision);
-            // Create state for LLM without screenshot if needed
-            const stateForLLM = this.config.maxInputTokens && state.screenshot
-                ? {
-                    ...state,
-                    screenshot: undefined, // This will be omitted in JSON.stringify
-                }
-                : state;
-            // Add state to message history
-            await this.messageManager.addMessage(new schema_1.SystemMessage(JSON.stringify(stateForLLM)));
-            // Get agent response
-            const messages = this.messageManager.getMessages();
-            // Estimate total tokens
-            const totalTokens = messages.reduce((sum, msg) => sum + estimateTokens(getMessageText(msg.content)), 0);
-            if (this.config.maxInputTokens && totalTokens > this.config.maxInputTokens) {
-                // Keep system prompt and last few messages
-                const systemPrompt = messages[0];
-                const recentMessages = messages.slice(-3); // Keep last 3 messages
-                this.messageManager.clear();
-                await this.messageManager.addMessage(systemPrompt);
-                for (const msg of recentMessages) {
-                    await this.messageManager.addMessage(msg);
-                }
+            const browserState = await this.browserContextInstance.getState();
+            // Estimate tokens and truncate if needed
+            const stateText = JSON.stringify(browserState);
+            if (estimateTokens(stateText) > MAX_TOKENS) {
+                console.warn('Browser state too large, truncating...');
+                browserState.content = browserState.content.slice(0, MAX_TOKENS * CHARS_PER_TOKEN);
             }
-            const response = await this.llm.call(this.messageManager.getMessages());
-            const responseText = cleanLLMResponse(response.content.toString());
-            // Parse and validate response
-            let parsedResponse;
-            try {
-                parsedResponse = JSON.parse(responseText);
-            }
-            catch (error) {
-                throw new Error(`Invalid JSON response: ${responseText}`);
-            }
-            // Add default current_state if missing
-            if (!parsedResponse.current_state) {
-                parsedResponse.current_state = {
-                    evaluation_previous_goal: "Unknown - No previous goal evaluation provided",
-                    memory: "No memory provided",
-                    next_goal: "Execute the provided actions",
-                };
-            }
-            if (!parsedResponse.action || !Array.isArray(parsedResponse.action)) {
-                throw new Error(`Invalid response format. Expected 'action' array, got: ${responseText}`);
-            }
-            // Add agent's thoughts to message history
-            await this.messageManager.addMessage(new schema_1.SystemMessage(JSON.stringify(parsedResponse.current_state)));
-            // Execute actions
+            await this.messageManager.addMessage(new schema_1.SystemMessage(this.systemPrompt.getPrompt(browserState, { step_number: step, max_steps: this.config.maxSteps ?? 3 }, this.config.task)));
+            const response = await this.config.llm.call(this.messageManager.getMessages());
+            const responseText = cleanLLMResponse(getMessageText(response.content));
+            const parsedResponse = JSON.parse(responseText);
             for (const action of parsedResponse.action) {
-                if (!action || typeof action !== 'object') {
-                    throw new Error(`Invalid action format: ${JSON.stringify(action)}`);
-                }
                 const [actionName, parameters] = Object.entries(action)[0];
-                const result = await this.controller.executeAction(actionName, parameters, this.browserContext);
+                console.log(`Executing action: ${actionName}`, parameters);
+                const result = await this.controller.executeAction(actionName, parameters, this.browserContextInstance);
                 this.lastResult = result;
                 if (result.isDone) {
                     return {
                         isDone: true,
-                        output: {
-                            status: "success",
+                        output: this.createSuccessOutput({
                             message: result.message || "Task completed",
-                            data: result.data,
-                        },
+                            data: result.data
+                        })
                     };
                 }
             }
             return {
                 isDone: false,
-                output: {
-                    status: "success",
+                output: this.createSuccessOutput({
                     message: "Step completed",
-                    data: this.lastResult,
-                },
+                    data: this.lastResult
+                })
             };
         }
         catch (error) {
+            console.error('Step error:', error);
             throw new Error(`Step ${step} failed: ${error.message}`);
         }
     }
-    /**
-     * Clean up resources
-     */
     async cleanup() {
-        if (this.browserContext && this.ownsBrowserContext) {
-            await this.browserContext.close();
-            this.browserContext = null;
+        if (this.browserContextInstance && this.ownsBrowserContext) {
+            await this.browserContextInstance.close();
+            this.browserContextInstance = undefined;
         }
-        if (this.browser && this.ownsBrowser) {
-            await this.browser.close();
-            this.browser = null;
+        if (this.browserInstance && this.ownsBrowser) {
+            await this.browserInstance.close();
+            this.browserInstance = undefined;
         }
     }
-    /**
-     * Create a GIF of the agent's history
-     */
-    async createHistoryGif() {
-        // TODO: Implement history GIF creation
-        throw new Error("Not implemented");
+    createSuccessOutput(data) {
+        return {
+            current_state: {
+                evaluation_previous_goal: "Success",
+                memory: "Task completed successfully",
+                next_goal: "None - task complete"
+            },
+            action: [{
+                    done: {
+                        message: "Task completed successfully",
+                        data
+                    }
+                }]
+        };
+    }
+    createErrorOutput(error) {
+        return {
+            current_state: {
+                evaluation_previous_goal: "Failed",
+                memory: `Error occurred: ${error}`,
+                next_goal: "Handle error and retry"
+            },
+            action: [{
+                    error: {
+                        message: error
+                    }
+                }]
+        };
     }
 }
 exports.Agent = Agent;

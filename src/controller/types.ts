@@ -31,7 +31,7 @@ export interface ActionResult {
 	/**
 	 * Additional data from the action
 	 */
-	data?: any;
+	data?: unknown;
 
 	/**
 	 * Whether the action is done
@@ -56,8 +56,10 @@ export const GoToUrlActionSchema = z.object({
 });
 
 export const ClickElementActionSchema = z.object({
-	index: z.number(),
+	index: z.number().optional(),
 	xpath: z.string().optional(),
+	x: z.number().optional(),
+	y: z.number().optional(),
 });
 
 export const InputTextActionSchema = z.object({
@@ -92,6 +94,10 @@ export const SendKeysActionSchema = z.object({
 	keys: z.string(),
 });
 
+export interface GoBackAction {
+	type: "go_back";
+}
+
 /**
  * Action types
  */
@@ -107,3 +113,19 @@ export type ExtractPageContentAction = z.infer<
 >;
 export type ScrollAction = z.infer<typeof ScrollActionSchema>;
 export type SendKeysAction = z.infer<typeof SendKeysActionSchema>;
+
+/**
+ * Union type of all possible action parameters
+ */
+export type ActionParams =
+	| SearchGoogleAction
+	| GoToUrlAction
+	| GoBackAction
+	| ClickElementAction
+	| InputTextAction
+	| SwitchTabAction
+	| OpenTabAction
+	| ExtractPageContentAction
+	| ScrollAction
+	| SendKeysAction
+	| DoneAction;
