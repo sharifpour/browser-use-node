@@ -38,23 +38,23 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BrowserContext = void 0;
 const defaultConfig = {
-    minimumWaitPageLoadTime: 0.5,
-    waitForNetworkIdlePageLoadTime: 1.0,
-    maximumWaitPageLoadTime: 5.0,
-    waitBetweenActions: 1.0,
-    disableSecurity: false,
+    minimumWaitPageLoadTime: 0, // No minimum wait
+    waitForNetworkIdlePageLoadTime: 0.1, // Minimal network idle check
+    maximumWaitPageLoadTime: 0.2, // Very short maximum wait
+    waitBetweenActions: 0, // No delay between actions
+    disableSecurity: true,
     browserWindowSize: {
         width: 1280,
         height: 1100,
     },
     javascript: true,
-    images: true,
+    images: false, // Keep images disabled for speed
 };
 /**
  * Browser context with enhanced capabilities
  */
 class BrowserContext {
-    constructor(config = {}, browser) {
+    constructor(browser, config = {}) {
         this.context = null;
         this.activePage = null;
         this.session = {
@@ -64,6 +64,90 @@ class BrowserContext {
         };
         this.config = { ...defaultConfig, ...config };
         this.browser = browser;
+        // Initialize immediately without waiting
+        void this.init();
+    }
+    /**
+     * Initialize the browser context
+     */
+    async init() {
+        if (this.context)
+            return;
+        const playwrightBrowser = await this.browser.getPlaywrightBrowser();
+        // Create context with minimal settings
+        this.context = await playwrightBrowser.newContext({
+            viewport: this.config.viewport || this.config.browserWindowSize,
+            userAgent: this.config.userAgent,
+            deviceScaleFactor: this.config.deviceScaleFactor,
+            isMobile: this.config.isMobile,
+            hasTouch: this.config.hasTouch,
+            javaScriptEnabled: this.config.javascript,
+            bypassCSP: true,
+            ignoreHTTPSErrors: this.config.ignoreHttpsErrors,
+            locale: this.config.locale,
+            timezoneId: this.config.timezoneId,
+            geolocation: this.config.geolocation,
+            permissions: this.config.permissions,
+            httpCredentials: this.config.httpCredentials,
+            offline: this.config.offline,
+            colorScheme: this.config.colorScheme,
+            // Speed up context creation
+            serviceWorkers: 'block',
+        });
+        // Configure route handler for images if needed
+        if (!this.config.images) {
+            await this.context.route("**/*.{png,jpg,jpeg,gif,webp}", (route) => route.abort());
+        }
+        // Add anti-detection scripts
+        await this.context.addInitScript(`
+			// Webdriver property
+			Object.defineProperty(navigator, 'webdriver', {
+				get: () => undefined
+			});
+
+			// Languages
+			Object.defineProperty(navigator, 'languages', {
+				get: () => ['en-US', 'en']
+			});
+
+			// Plugins
+			Object.defineProperty(navigator, 'plugins', {
+				get: () => [1, 2, 3, 4, 5]
+			});
+
+			// Chrome runtime
+			window.chrome = { runtime: {} };
+
+			// Permissions
+			const originalQuery = window.navigator.permissions.query;
+			window.navigator.permissions.query = (parameters) => (
+				parameters.name === 'notifications' ?
+					Promise.resolve({ state: Notification.permission }) :
+					originalQuery(parameters)
+			);
+		`);
+        // Optimize context after creation
+        await this.optimizeContext();
+    }
+    async optimizeContext() {
+        if (!this.context)
+            return;
+        // Set aggressive timeouts
+        this.context.setDefaultNavigationTimeout(2000); // 2 seconds max
+        this.context.setDefaultTimeout(1000); // 1 second max
+        // Block all unnecessary resources immediately and in parallel
+        await Promise.all([
+            this.context.route('**/*.{png,jpg,jpeg,gif,svg,ico,css,scss,less}', route => route.abort()),
+            this.context.route('**/*.{woff,woff2,ttf,otf,eot}', route => route.abort()),
+            this.context.route('**/analytics.js', route => route.abort()),
+            this.context.route('**/gtag.js', route => route.abort()),
+            this.context.route('**/ga.js', route => route.abort()),
+            this.context.route('**/adsbygoogle.js', route => route.abort()),
+            // Add more resource blocking in parallel
+            this.context.route('**/*metrics*', route => route.abort()),
+            this.context.route('**/*tracking*', route => route.abort()),
+            this.context.route('**/*telemetry*', route => route.abort()),
+        ]);
     }
     /**
      * Get the active page
@@ -72,67 +156,13 @@ class BrowserContext {
         if (!this.context) {
             await this.init();
         }
-        if (!this.context) {
-            throw new Error("Failed to initialize browser context");
-        }
         if (!this.activePage) {
             this.activePage = await this.context.newPage();
+            // Set aggressive page-level timeouts
+            await this.activePage.setDefaultTimeout(1000);
+            await this.activePage.setDefaultNavigationTimeout(2000);
         }
         return this.activePage;
-    }
-    /**
-     * Initialize the browser context
-     */
-    async init() {
-        const playwrightBrowser = await this.browser.getPlaywrightBrowser();
-        this.context = await playwrightBrowser.newContext({
-            javaScriptEnabled: this.config.javascript,
-            viewport: this.config.viewport,
-            deviceScaleFactor: this.config.deviceScaleFactor,
-            isMobile: this.config.isMobile,
-            hasTouch: this.config.hasTouch,
-            locale: this.config.locale,
-            timezoneId: this.config.timezoneId,
-            geolocation: this.config.geolocation,
-            permissions: this.config.permissions,
-            httpCredentials: this.config.httpCredentials,
-            ignoreHTTPSErrors: this.config.ignoreHttpsErrors,
-            offline: this.config.offline,
-            colorScheme: this.config.colorScheme,
-            userAgent: this.config.userAgent,
-        });
-        // Configure route handler for images if needed
-        if (!this.config.images) {
-            await this.context.route("**/*.{png,jpg,jpeg,gif,webp}", (route) => route.abort());
-        }
-        // Add anti-detection scripts
-        await this.context.addInitScript(`
-      // Webdriver property
-      Object.defineProperty(navigator, 'webdriver', {
-        get: () => undefined
-      });
-
-      // Languages
-      Object.defineProperty(navigator, 'languages', {
-        get: () => ['en-US', 'en']
-      });
-
-      // Plugins
-      Object.defineProperty(navigator, 'plugins', {
-        get: () => [1, 2, 3, 4, 5]
-      });
-
-      // Chrome runtime
-      window.chrome = { runtime: {} };
-
-      // Permissions
-      const originalQuery = window.navigator.permissions.query;
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === 'notifications' ?
-          Promise.resolve({ state: Notification.permission }) :
-          originalQuery(parameters)
-      );
-    `);
     }
     /**
      * Close the browser context
@@ -154,10 +184,22 @@ class BrowserContext {
             if (!element) {
                 throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
             }
-            await element.scrollIntoViewIfNeeded({ timeout: 2500 });
-            await element.fill("");
-            await element.type(text);
-            await page.waitForLoadState();
+            // Wait for element to be ready
+            await element.waitFor({ state: 'visible', timeout: 5000 });
+            await element.scrollIntoViewIfNeeded();
+            // Clear and type text
+            await element.click();
+            await page.keyboard.press('Control+A');
+            await page.keyboard.press('Backspace');
+            await element.type(text, { delay: 50 });
+            // Handle Google search
+            if (page.url().includes('google.com')) {
+                await page.keyboard.press('Enter');
+                await Promise.race([
+                    page.waitForLoadState('networkidle', { timeout: 5000 }),
+                    page.waitForSelector('div.g', { timeout: 5000 })
+                ]).catch(() => undefined);
+            }
         }
         catch (error) {
             throw new Error(`Failed to input text: ${error.message}`);
@@ -168,24 +210,63 @@ class BrowserContext {
      */
     async clickElement(elementNode) {
         const page = await this.getPage();
+        const element = await this.locateElement(elementNode);
+        if (!element) {
+            throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
+        }
         try {
-            const element = await this.locateElement(elementNode);
-            if (!element) {
-                throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
-            }
-            try {
-                await element.click({ timeout: 1500 });
-                await page.waitForLoadState();
-            }
-            catch (error) {
-                // Fallback to JavaScript click
+            // Wait for element to be ready
+            await element.waitFor({ state: 'visible', timeout: 5000 });
+            await element.scrollIntoViewIfNeeded();
+            // Click strategies
+            const strategies = [
+                // Normal click
+                async () => {
+                    await element.click({ timeout: 5000 });
+                },
+                // JavaScript click via evaluate
+                async () => {
+                    const elementHandle = await element.elementHandle();
+                    if (elementHandle) {
+                        await page.evaluate(`
+							(element) => {
+								try {
+									// Try native click first
+									element.click();
+								} catch {
+									// Fallback to event dispatch
+									const event = new MouseEvent('click', {
+										bubbles: true,
+										cancelable: true,
+										view: window
+									});
+									element.dispatchEvent(event);
+								}
+							}
+						`, elementHandle);
+                    }
+                },
+                // Mouse click at coordinates
+                async () => {
+                    const box = await element.boundingBox();
+                    if (box) {
+                        await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+                    }
+                }
+            ];
+            let lastError;
+            for (const strategy of strategies) {
                 try {
-                    await page.evaluate("(el) => el.click()", element);
-                    await page.waitForLoadState();
+                    await strategy();
+                    await page.waitForTimeout(100);
+                    return;
                 }
-                catch (jsError) {
-                    throw new Error(`Failed to click element: ${jsError.message}`);
+                catch (e) {
+                    lastError = e;
                 }
+            }
+            if (lastError) {
+                throw lastError;
             }
         }
         catch (error) {
@@ -193,17 +274,61 @@ class BrowserContext {
         }
     }
     /**
-     * Locate an element in the page
+     * Locate an element on the page
      */
     async locateElement(elementNode) {
         const page = await this.getPage();
-        if (elementNode.xpath) {
-            return page.locator(`xpath=${elementNode.xpath}`).first();
+        const strategies = [
+            async () => {
+                const text = elementNode.attributes?.text || '';
+                return text ? page.getByText(text, { exact: true }) : null;
+            },
+            async () => {
+                const role = elementNode.attributes?.role || 'button';
+                const text = elementNode.attributes?.text || '';
+                return text ? page.getByRole(role, { name: text }) : null;
+            },
+            async () => {
+                const tag = elementNode.tag || '';
+                const placeholder = elementNode.attributes?.placeholder || '';
+                return placeholder ? page.locator(`${tag}[placeholder="${placeholder}"]`) : null;
+            },
+            async () => {
+                const locationStr = elementNode.attributes?.location;
+                if (!locationStr)
+                    return null;
+                try {
+                    // First convert to unknown, then to ElementLocation
+                    const parsed = JSON.parse(locationStr);
+                    const location = parsed;
+                    // Validate the location object
+                    if (typeof location === 'object' &&
+                        location !== null &&
+                        typeof location.x === 'number' &&
+                        typeof location.y === 'number' &&
+                        typeof location.width === 'number' &&
+                        typeof location.height === 'number') {
+                        return page.locator(`*:near(:root, ${location.x}, ${location.y})`);
+                    }
+                }
+                catch {
+                    // Invalid location format
+                }
+                return null;
+            }
+        ];
+        for (const strategy of strategies) {
+            try {
+                const element = await strategy();
+                if (element && await element.count() > 0) {
+                    return element;
+                }
+            }
+            catch {
+                // Skip to next strategy
+            }
         }
-        if (elementNode.selector) {
-            return page.locator(elementNode.selector).first();
-        }
-        throw new Error("No valid selector found for element");
+        return null;
     }
     /**
      * Navigate forward in history
@@ -268,22 +393,22 @@ class BrowserContext {
         try {
             const page = await this.getPage();
             await page.evaluate(`
-        try {
-          // Remove the highlight container and all its contents
-          const container = document.getElementById('playwright-highlight-container');
-          if (container) {
-            container.remove();
-          }
+				try {
+					// Remove the highlight container and all its contents
+					const container = document.getElementById('playwright-highlight-container');
+					if (container) {
+						container.remove();
+					}
 
-          // Remove highlight attributes from elements
-          const highlightedElements = document.querySelectorAll('[browser-user-highlight-id^="playwright-highlight-"]');
-          highlightedElements.forEach(el => {
-            el.removeAttribute('browser-user-highlight-id');
-          });
-        } catch (e) {
-          console.error('Failed to remove highlights:', e);
-        }
-      `);
+					// Remove highlight attributes from elements
+					const highlightedElements = document.querySelectorAll('[browser-user-highlight-id^="playwright-highlight-"]');
+					highlightedElements.forEach(el => {
+						el.removeAttribute('browser-user-highlight-id');
+					});
+				} catch (e) {
+					console.error('Failed to remove highlights:', e);
+				}
+			`);
         }
         catch (error) {
             // Don't throw error since this is not critical functionality
@@ -298,8 +423,8 @@ class BrowserContext {
             try {
                 const cookies = await this.context.cookies();
                 console.info(`Saving ${cookies.length} cookies to ${this.config.cookiesFile}`);
-                const fs = await Promise.resolve().then(() => __importStar(require("fs/promises")));
-                const path = await Promise.resolve().then(() => __importStar(require("path")));
+                const fs = await Promise.resolve().then(() => __importStar(require("node:fs/promises")));
+                const path = await Promise.resolve().then(() => __importStar(require("node:path")));
                 // Create directory if it doesn't exist
                 const dirname = path.dirname(this.config.cookiesFile);
                 if (dirname) {
@@ -315,50 +440,38 @@ class BrowserContext {
     /**
      * Check if element is a file uploader
      */
-    async isFileUploader(elementNode, maxDepth = 3) {
-        const checkElement = (el, depth = 0) => {
-            if (depth > maxDepth)
-                return false;
-            // Check current element
-            if (el.tag === "input") {
-                const isUploader = el.attributes["type"] === "file" ||
-                    el.attributes["accept"] !== undefined;
-                if (isUploader)
+    async isFileUploader(elementNode) {
+        if (elementNode.tag === 'input') {
+            return elementNode.attributes.type === 'file' ||
+                elementNode.attributes.accept !== undefined;
+        }
+        // Check children recursively
+        if (elementNode.children) {
+            for (const child of elementNode.children) {
+                if (await this.isFileUploader(child)) {
                     return true;
-            }
-            // Check children
-            if (el.children && depth < maxDepth) {
-                for (const child of el.children) {
-                    if (checkElement(child, depth + 1)) {
-                        return true;
-                    }
                 }
             }
-            return false;
-        };
-        return checkElement(elementNode);
+        }
+        return false;
     }
     /**
      * Wait for page and frames to load
      */
     async waitForPageAndFramesLoad() {
         const page = await this.getPage();
-        // Wait for minimum time
-        await new Promise((resolve) => setTimeout(resolve, this.config.minimumWaitPageLoadTime * 1000));
         try {
-            // Wait for network idle
-            await page.waitForLoadState("networkidle", {
-                timeout: this.config.waitForNetworkIdlePageLoadTime * 1000,
-            });
+            // Wait only for essential events in parallel
+            await Promise.all([
+                page.waitForLoadState('domcontentloaded'), // Don't wait for full load
+                page.waitForLoadState('networkidle', {
+                    timeout: 100 // Very short network idle timeout
+                }).catch(() => { }) // Ignore network timeout
+            ]);
         }
         catch (error) {
-            console.debug("Network idle timeout:", error);
-        }
-        // Wait for maximum time if needed
-        if (this.config.maximumWaitPageLoadTime > this.config.minimumWaitPageLoadTime) {
-            const remainingTime = this.config.maximumWaitPageLoadTime -
-                this.config.minimumWaitPageLoadTime;
-            await new Promise((resolve) => setTimeout(resolve, remainingTime * 1000));
+            // Log but continue if there are issues
+            console.debug("Load state warning:", error.message);
         }
     }
     /**
@@ -368,22 +481,69 @@ class BrowserContext {
         const page = await this.getPage();
         try {
             await this.removeHighlights();
-            // TODO: Implement DOMService to get clickable elements
-            const content = ""; // await domService.getClickableElements();
-            let screenshot;
-            if (useVision) {
-                screenshot = await this.takeScreenshot();
-            }
+            // Run all content extraction in parallel
+            const [url, title, content, screenshot] = await Promise.all([
+                page.url(),
+                page.title(),
+                // Extract clickable elements and text content in parallel
+                page.evaluate(() => {
+                    const clickableElements = Array.from(document.querySelectorAll('a, button, input, select, [role="button"], [role="link"]'))
+                        .map(el => {
+                        const rect = el.getBoundingClientRect();
+                        return {
+                            tag: el.tagName.toLowerCase(),
+                            text: el.textContent?.trim() || '',
+                            type: el.type || '',
+                            href: el.href || '',
+                            value: el.value || '',
+                            placeholder: el.placeholder || '',
+                            isVisible: rect.width > 0 && rect.height > 0,
+                            location: {
+                                x: rect.x,
+                                y: rect.y,
+                                width: rect.width,
+                                height: rect.height
+                            }
+                        };
+                    })
+                        .filter(el => el.isVisible);
+                    // Get main content text
+                    const mainContent = document.body.innerText
+                        .split('\n')
+                        .map(line => line.trim())
+                        .filter(line => line.length > 0)
+                        .join('\n');
+                    return {
+                        clickableElements,
+                        mainContent,
+                        headings: Array.from(document.querySelectorAll('h1, h2, h3'))
+                            .map(h => h.textContent?.trim())
+                            .filter(Boolean)
+                    };
+                }),
+                // Take screenshot if vision is enabled
+                useVision ? this.takeScreenshot() : Promise.resolve(undefined)
+            ]);
             return {
-                url: page.url(),
-                title: await page.title(),
-                content,
-                screenshot,
+                url,
+                title,
+                content: JSON.stringify({
+                    clickableElements: content.clickableElements,
+                    mainContent: content.mainContent,
+                    headings: content.headings
+                }),
+                screenshot
             };
         }
         catch (error) {
             console.error("Failed to update state:", error);
-            throw error;
+            // Fallback to basic content extraction
+            return {
+                url: page.url(),
+                title: await page.title(),
+                content: await page.evaluate(() => document.body.innerText),
+                screenshot: useVision ? await this.takeScreenshot() : undefined
+            };
         }
     }
     /**
@@ -404,20 +564,15 @@ class BrowserContext {
     /**
      * Switch to a specific tab
      */
-    async switchToTab(index) {
-        if (!this.context) {
-            throw new Error("Browser context not initialized");
-        }
+    async switchToTab(tabIndex) {
         const pages = this.context.pages();
-        if (index < 0) {
-            index = pages.length + index;
-        }
-        if (index >= 0 && index < pages.length) {
-            this.activePage = pages[index];
+        const adjustedIndex = tabIndex < 0 ? pages.length + tabIndex : tabIndex;
+        if (adjustedIndex >= 0 && adjustedIndex < pages.length) {
+            this.activePage = pages[adjustedIndex];
             await this.activePage.bringToFront();
         }
         else {
-            throw new Error(`Invalid tab index: ${index}`);
+            throw new Error(`Invalid tab index: ${tabIndex}`);
         }
     }
     /**
@@ -429,8 +584,16 @@ class BrowserContext {
         }
         this.activePage = await this.context.newPage();
         if (url) {
-            await this.activePage.goto(url);
-            await this.activePage.waitForLoadState();
+            // Navigate and don't wait for full load
+            await Promise.all([
+                this.activePage.goto(url, {
+                    waitUntil: 'domcontentloaded',
+                    timeout: 2000
+                }),
+                this.activePage.waitForLoadState('networkidle', {
+                    timeout: 100
+                }).catch(() => { })
+            ]);
         }
     }
 }

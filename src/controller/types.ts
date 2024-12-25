@@ -108,9 +108,7 @@ export type InputTextAction = z.infer<typeof InputTextActionSchema>;
 export type DoneAction = z.infer<typeof DoneActionSchema>;
 export type SwitchTabAction = z.infer<typeof SwitchTabActionSchema>;
 export type OpenTabAction = z.infer<typeof OpenTabActionSchema>;
-export type ExtractPageContentAction = z.infer<
-	typeof ExtractPageContentActionSchema
->;
+export type ExtractPageContentAction = z.infer<typeof ExtractPageContentActionSchema>;
 export type ScrollAction = z.infer<typeof ScrollActionSchema>;
 export type SendKeysAction = z.infer<typeof SendKeysActionSchema>;
 

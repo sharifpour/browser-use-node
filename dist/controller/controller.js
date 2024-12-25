@@ -85,6 +85,38 @@ class Controller {
             const page = await browser.getPage();
             const initialPages = (await browser.getPages()).length;
             try {
+                // Special handling for Google search results
+                if (page.url().includes('google.com')) {
+                    // Try to click the first search result
+                    const searchResults = await page.$$('div.g a');
+                    if (searchResults.length > 0) {
+                        await searchResults[0].click();
+                        const msg = "🖱️  Clicked first Google search result";
+                        console.log(msg);
+                        return {
+                            success: true,
+                            extractedContent: msg,
+                            includeInMemory: true,
+                        };
+                    }
+                }
+                // Default index-based behavior
+                const session = await browser.getSession();
+                const state = session.cachedState;
+                if (!(params.index in state.selectorMap)) {
+                    throw new Error(`Element with index ${params.index} does not exist - retry or use alternative actions`);
+                }
+                const elementNode = state.selectorMap[params.index];
+                // Check if element is a file uploader
+                if (await browser.isFileUploader(elementNode)) {
+                    const msg = `Index ${params.index} - has an element which opens file upload dialog. To upload files please use a specific function to upload files`;
+                    console.log(msg);
+                    return {
+                        success: true,
+                        extractedContent: msg,
+                        includeInMemory: true,
+                    };
+                }
                 // Get viewport size for default click position
                 const viewport = page.viewportSize() || { width: 800, height: 600 };
                 // Use center of viewport if no coordinates provided
@@ -194,25 +226,65 @@ class Controller {
             handler: openTabHandler,
         });
         // Content Actions
-        const extractContentHandler = async (_params, browser) => {
+        const extractPageContentHandler = async (params, browser) => {
             if (!browser) {
-                throw new Error("Browser context is required for extract_content action");
+                throw new Error("Browser context is required for extract_page_content action");
             }
             const page = await browser.getPage();
-            const content = await page.content();
-            const msg = `📄  Extracted page content\n: ${content}\n`;
-            console.log(msg);
-            return {
-                success: true,
-                extractedContent: msg,
-                includeInMemory: true,
-            };
+            try {
+                // Get page content based on format
+                const format = params.format || 'text';
+                let content;
+                switch (format) {
+                    case 'html':
+                        content = await page.content();
+                        break;
+                    case 'markdown':
+                        // Convert HTML to markdown-like format
+                        content = await page.evaluate(() => {
+                            const links = Array.from(document.querySelectorAll('a')).map(a => `[${a.textContent}](${a.href})`).join('\n');
+                            const text = document.body.innerText
+                                .split('\n')
+                                .filter(line => line.trim())
+                                .join('\n\n');
+                            return `${text}\n\nLinks:\n${links}`;
+                        });
+                        break;
+                    default: // handles 'text' and any other cases
+                        content = await page.evaluate(() => {
+                            // Get search results
+                            const results = Array.from(document.querySelectorAll('div.g')).map(div => {
+                                const title = div.querySelector('h3')?.textContent || '';
+                                const snippet = div.querySelector('div.VwiC3b')?.textContent || '';
+                                const link = div.querySelector('a')?.href || '';
+                                return `${title}\n${snippet}\n${link}\n`;
+                            }).join('\n---\n');
+                            return results || document.body.innerText;
+                        });
+                        break;
+                }
+                const msg = `📄 Extracted page content (${format} format):\n${content.slice(0, 150)}...`;
+                console.log(msg);
+                return {
+                    success: true,
+                    extractedContent: content,
+                    includeInMemory: true,
+                    data: { format, content }
+                };
+            }
+            catch (error) {
+                console.warn(error.message);
+                return {
+                    success: false,
+                    error: error.message,
+                };
+            }
         };
-        extractContentHandler.requiresBrowser = true;
-        this.registry.set("extract_content", {
-            name: "extract_content",
-            description: "Extract page content",
-            handler: extractContentHandler,
+        extractPageContentHandler.requiresBrowser = true;
+        this.registry.set("extract_page_content", {
+            name: "extract_page_content",
+            description: "Extract content from the current page",
+            handler: extractPageContentHandler,
         });
         const scrollDownHandler = async (params, browser) => {
             if (!browser) {

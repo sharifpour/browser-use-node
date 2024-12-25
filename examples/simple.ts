@@ -9,7 +9,12 @@ async function main() {
   console.log('Starting browser...');
   const browser = new Browser({
     headless: false,
-    disableSecurity: true
+    extraChromiumArgs: [
+      '--disable-gpu',
+      '--disable-dev-shm-usage',
+      '--no-sandbox',
+      '--disable-extensions',
+    ]
   });
 
   console.log('Creating browser context...');
@@ -17,28 +22,37 @@ async function main() {
     viewport: {
       width: 1280,
       height: 800
-    }
+    },
+    minimumWaitPageLoadTime: 0.1,
+    waitForNetworkIdlePageLoadTime: 0.2,
+    maximumWaitPageLoadTime: 1.0,
+    waitBetweenActions: 0.1,
   });
 
   console.log('Initializing LLM...');
   const llm = new ChatOpenAI({
-    modelName: "gpt-4",
-    temperature: 0,
+    modelName: "gpt-4o-mini",
+    temperature: 0.5,
+    maxTokens: 1000,
+    maxRetries: 3,
+    maxConcurrency: 1
   });
 
   console.log('Creating agent...');
   const agent = new Agent({
     task: "Go to google.com and search for 'weather today'",
     llm,
-    useVision: true,
+    useVision: false,
     browser,
     browserContext,
   });
 
   try {
     console.log('Running agent...');
-    const result = await agent.run(3);
+    const result = await agent.run(5);
     console.log('Task completed:', result);
+
+    await browserContext.close();
   } catch (error) {
     console.error('Error:', error);
   } finally {

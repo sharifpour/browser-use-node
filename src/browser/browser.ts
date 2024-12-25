@@ -2,7 +2,7 @@
  * Playwright browser on steroids.
  */
 
-import { type Browser as PlaywrightBrowser, chromium } from "playwright";
+import { type Browser as PlaywrightBrowser, webkit } from "playwright";
 import { BrowserContext, type BrowserContextConfig } from "./context";
 
 export interface ProxySettings {
@@ -90,7 +90,7 @@ export class Browser {
 	 * Create a browser context
 	 */
 	async newContext(config: BrowserContextConfig = {}): Promise<BrowserContext> {
-		return new BrowserContext(config, this);
+    return new BrowserContext(this, config);
 	}
 
 	/**
@@ -116,7 +116,7 @@ export class Browser {
 	 */
 	private async setupBrowser(): Promise<PlaywrightBrowser> {
 		if (this.config.wssUrl) {
-			return chromium.connect(this.config.wssUrl);
+      return webkit.connect(this.config.wssUrl);
 		}
 
 		if (this.config.chromeInstancePath) {
@@ -132,22 +132,30 @@ export class Browser {
 				]
 			: [];
 
-		return chromium.launch({
+
+    return webkit.launch({
 			headless: this.config.headless,
 			args: [
 				"--no-sandbox",
 				"--disable-blink-features=AutomationControlled",
 				"--disable-infobars",
 				"--disable-background-timer-throttling",
-				"--disable-popup-blocking",
+        // "--disable-popup-blocking",
 				"--disable-backgrounding-occluded-windows",
 				"--disable-renderer-backgrounding",
 				"--disable-window-activation",
 				"--disable-focus-on-load",
-				"--no-first-run",
+        // "--no-first-run",
 				"--no-default-browser-check",
 				"--no-startup-window",
 				"--window-position=0,0",
+        "--window-size=1280,800",
+        "--disable-dev-shm-usage",
+        "--disable-gpu",
+        "--disable-setuid-sandbox",
+        "--no-zygote",
+        "--single-process",
+        "--disable-dev-shm-usage",
 				...disableSecurityArgs,
 				...(this.config.extraChromiumArgs || []),
 			],

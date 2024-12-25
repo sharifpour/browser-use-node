@@ -26,7 +26,7 @@ class Browser {
      * Create a browser context
      */
     async newContext(config = {}) {
-        return new context_1.BrowserContext(config, this);
+        return new context_1.BrowserContext(this, config);
     }
     /**
      * Get a browser context
@@ -49,7 +49,7 @@ class Browser {
      */
     async setupBrowser() {
         if (this.config.wssUrl) {
-            return playwright_1.chromium.connect(this.config.wssUrl);
+            return playwright_1.webkit.connect(this.config.wssUrl);
         }
         if (this.config.chromeInstancePath) {
             // TODO: Implement Chrome instance connection
@@ -62,22 +62,29 @@ class Browser {
                 "--disable-features=IsolateOrigins,site-per-process",
             ]
             : [];
-        return playwright_1.chromium.launch({
+        return playwright_1.webkit.launch({
             headless: this.config.headless,
             args: [
                 "--no-sandbox",
                 "--disable-blink-features=AutomationControlled",
                 "--disable-infobars",
                 "--disable-background-timer-throttling",
-                "--disable-popup-blocking",
+                // "--disable-popup-blocking",
                 "--disable-backgrounding-occluded-windows",
                 "--disable-renderer-backgrounding",
                 "--disable-window-activation",
                 "--disable-focus-on-load",
-                "--no-first-run",
+                // "--no-first-run",
                 "--no-default-browser-check",
                 "--no-startup-window",
                 "--window-position=0,0",
+                "--window-size=1280,800",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--disable-setuid-sandbox",
+                "--no-zygote",
+                "--single-process",
+                "--disable-dev-shm-usage",
                 ...disableSecurityArgs,
                 ...(this.config.extraChromiumArgs || []),
             ],

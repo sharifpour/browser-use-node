@@ -61,13 +61,17 @@ export declare const BrowserConfigSchema: z.ZodObject<{
         height?: number;
     }>>;
 }, "strip", z.ZodTypeAny, {
-    headless?: boolean;
-    disableSecurity?: boolean;
-    extraChromiumArgs?: string[];
     cookiesFile?: string;
     minimumWaitPageLoadTime?: number;
     waitForNetworkIdlePageLoadTime?: number;
     maximumWaitPageLoadTime?: number;
+    disableSecurity?: boolean;
+    viewport?: {
+        width?: number;
+        height?: number;
+    };
+    headless?: boolean;
+    extraChromiumArgs?: string[];
     recording?: {
         path?: string;
         options?: Record<string, unknown>;
@@ -76,19 +80,19 @@ export declare const BrowserConfigSchema: z.ZodObject<{
     trace?: {
         path?: string;
         enabled?: boolean;
-    };
-    viewport?: {
-        width?: number;
-        height?: number;
     };
 }, {
-    headless?: boolean;
-    disableSecurity?: boolean;
-    extraChromiumArgs?: string[];
     cookiesFile?: string;
     minimumWaitPageLoadTime?: number;
     waitForNetworkIdlePageLoadTime?: number;
     maximumWaitPageLoadTime?: number;
+    disableSecurity?: boolean;
+    viewport?: {
+        width?: number;
+        height?: number;
+    };
+    headless?: boolean;
+    extraChromiumArgs?: string[];
     recording?: {
         path?: string;
         options?: Record<string, unknown>;
@@ -97,10 +101,6 @@ export declare const BrowserConfigSchema: z.ZodObject<{
     trace?: {
         path?: string;
         enabled?: boolean;
-    };
-    viewport?: {
-        width?: number;
-        height?: number;
     };
 }>;
 export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
@@ -172,13 +172,17 @@ export declare const AgentConfigSchema: z.ZodObject<{
             height?: number;
         }>>;
     }, "strip", z.ZodTypeAny, {
-        headless?: boolean;
-        disableSecurity?: boolean;
-        extraChromiumArgs?: string[];
         cookiesFile?: string;
         minimumWaitPageLoadTime?: number;
         waitForNetworkIdlePageLoadTime?: number;
         maximumWaitPageLoadTime?: number;
+        disableSecurity?: boolean;
+        viewport?: {
+            width?: number;
+            height?: number;
+        };
+        headless?: boolean;
+        extraChromiumArgs?: string[];
         recording?: {
             path?: string;
             options?: Record<string, unknown>;
@@ -187,19 +191,19 @@ export declare const AgentConfigSchema: z.ZodObject<{
         trace?: {
             path?: string;
             enabled?: boolean;
-        };
-        viewport?: {
-            width?: number;
-            height?: number;
         };
     }, {
-        headless?: boolean;
-        disableSecurity?: boolean;
-        extraChromiumArgs?: string[];
         cookiesFile?: string;
         minimumWaitPageLoadTime?: number;
         waitForNetworkIdlePageLoadTime?: number;
         maximumWaitPageLoadTime?: number;
+        disableSecurity?: boolean;
+        viewport?: {
+            width?: number;
+            height?: number;
+        };
+        headless?: boolean;
+        extraChromiumArgs?: string[];
         recording?: {
             path?: string;
             options?: Record<string, unknown>;
@@ -208,23 +212,23 @@ export declare const AgentConfigSchema: z.ZodObject<{
         trace?: {
             path?: string;
             enabled?: boolean;
-        };
-        viewport?: {
-            width?: number;
-            height?: number;
         };
     }>>;
 }, "strip", z.ZodTypeAny, {
     task?: string;
     model?: string;
     browserConfig?: {
-        headless?: boolean;
-        disableSecurity?: boolean;
-        extraChromiumArgs?: string[];
         cookiesFile?: string;
         minimumWaitPageLoadTime?: number;
         waitForNetworkIdlePageLoadTime?: number;
         maximumWaitPageLoadTime?: number;
+        disableSecurity?: boolean;
+        viewport?: {
+            width?: number;
+            height?: number;
+        };
+        headless?: boolean;
+        extraChromiumArgs?: string[];
         recording?: {
             path?: string;
             options?: Record<string, unknown>;
@@ -233,23 +237,23 @@ export declare const AgentConfigSchema: z.ZodObject<{
         trace?: {
             path?: string;
             enabled?: boolean;
-        };
-        viewport?: {
-            width?: number;
-            height?: number;
         };
     };
 }, {
     task?: string;
     model?: string;
     browserConfig?: {
-        headless?: boolean;
-        disableSecurity?: boolean;
-        extraChromiumArgs?: string[];
         cookiesFile?: string;
         minimumWaitPageLoadTime?: number;
         waitForNetworkIdlePageLoadTime?: number;
         maximumWaitPageLoadTime?: number;
+        disableSecurity?: boolean;
+        viewport?: {
+            width?: number;
+            height?: number;
+        };
+        headless?: boolean;
+        extraChromiumArgs?: string[];
         recording?: {
             path?: string;
             options?: Record<string, unknown>;
@@ -258,10 +262,6 @@ export declare const AgentConfigSchema: z.ZodObject<{
         trace?: {
             path?: string;
             enabled?: boolean;
-        };
-        viewport?: {
-            width?: number;
-            height?: number;
         };
     };
 }>;

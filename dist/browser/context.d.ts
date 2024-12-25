@@ -14,17 +14,17 @@ export interface BrowserContextConfig {
     cookiesFile?: string;
     /**
      * Minimum time to wait before getting page state for LLM input
-     * @default 0.5
+     * @default 1.0
      */
     minimumWaitPageLoadTime?: number;
     /**
      * Time to wait for network requests to finish before getting page state
-     * @default 1.0
+     * @default 3.0
      */
     waitForNetworkIdlePageLoadTime?: number;
     /**
      * Maximum time to wait for page load before proceeding anyway
-     * @default 5.0
+     * @default 10.0
      */
     maximumWaitPageLoadTime?: number;
     /**
@@ -139,15 +139,16 @@ export declare class BrowserContext {
     protected context: PlaywrightContext | null;
     private activePage;
     private session;
-    constructor(config: BrowserContextConfig, browser: Browser);
-    /**
-     * Get the active page
-     */
-    getPage(): Promise<Page>;
+    constructor(browser: Browser, config?: Partial<BrowserContextConfig>);
     /**
      * Initialize the browser context
      */
     private init;
+    private optimizeContext;
+    /**
+     * Get the active page
+     */
+    getPage(): Promise<Page>;
     /**
      * Close the browser context
      */
@@ -161,7 +162,7 @@ export declare class BrowserContext {
      */
     clickElement(elementNode: DOMElement): Promise<void>;
     /**
-     * Locate an element in the page
+     * Locate an element on the page
      */
     private locateElement;
     /**
@@ -199,7 +200,7 @@ export declare class BrowserContext {
     /**
      * Check if element is a file uploader
      */
-    isFileUploader(elementNode: DOMElement, maxDepth?: number): Promise<boolean>;
+    isFileUploader(elementNode: DOMElement): Promise<boolean>;
     /**
      * Wait for page and frames to load
      */
@@ -219,7 +220,7 @@ export declare class BrowserContext {
     /**
      * Switch to a specific tab
      */
-    switchToTab(index: number): Promise<void>;
+    switchToTab(tabIndex: number): Promise<void>;
     /**
      * Create a new tab
      */

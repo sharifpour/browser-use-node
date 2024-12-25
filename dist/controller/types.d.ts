@@ -73,23 +73,23 @@ export declare const InputTextActionSchema: z.ZodObject<{
     text: z.ZodString;
     xpath: z.ZodOptional<z.ZodString>;
 }, "strip", z.ZodTypeAny, {
+    text?: string;
     index?: number;
     xpath?: string;
-    text?: string;
 }, {
+    text?: string;
     index?: number;
     xpath?: string;
-    text?: string;
 }>;
 export declare const DoneActionSchema: z.ZodObject<{
     message: z.ZodString;
     data: z.ZodOptional<z.ZodAny>;
 }, "strip", z.ZodTypeAny, {
-    message?: string;
     data?: any;
+    message?: string;
 }, {
-    message?: string;
     data?: any;
+    message?: string;
 }>;
 export declare const SwitchTabActionSchema: z.ZodObject<{
     index: z.ZodNumber;
@@ -108,9 +108,9 @@ export declare const OpenTabActionSchema: z.ZodObject<{
 export declare const ExtractPageContentActionSchema: z.ZodObject<{
     format: z.ZodDefault<z.ZodEnum<["text", "markdown", "html"]>>;
 }, "strip", z.ZodTypeAny, {
-    format?: "text" | "markdown" | "html";
+    format?: "html" | "text" | "markdown";
 }, {
-    format?: "text" | "markdown" | "html";
+    format?: "html" | "text" | "markdown";
 }>;
 export declare const ScrollActionSchema: z.ZodObject<{
     amount: z.ZodOptional<z.ZodNumber>;
