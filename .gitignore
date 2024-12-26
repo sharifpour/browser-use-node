@@ -13,6 +13,11 @@ dist/
 dist/*
 dist
 
+
+# TODO
+todo.txt
+_todo.txt
+
 # IDE
 .vscode/
 .idea/
