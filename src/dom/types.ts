@@ -26,17 +26,7 @@ export interface DOMBaseNode {
 	/**
 	 * Element hash
 	 */
-	hash?: {
-		/**
-		 * Branch path hash
-		 */
-		branchPathHash: string;
-
-		/**
-		 * Element hash
-		 */
-		elementHash: string;
-	};
+	hash?: HashedDomElement;
 }
 
 /**
@@ -109,19 +99,9 @@ export interface DOMElementNode extends DOMBaseNode {
 	};
 
 	/**
-	 * Element hash
-	 */
-	hash?: HashedDomElement;
-
-	/**
 	 * Whether the element is clickable
 	 */
 	isClickable: boolean;
-
-	/**
-	 * Whether the element is visible
-	 */
-	isVisible: boolean;
 
 	/**
 	 * Whether the element is an iframe
@@ -151,7 +131,7 @@ export interface DOMHistoryElement {
 	/**
 	 * Parent branch path
 	 */
-	entireParentBranchPath: string;
+	entireParentBranchPath: string[];
 
 	/**
 	 * Element attributes
@@ -182,6 +162,11 @@ export interface DOMState {
 	 * Selector map
 	 */
 	selectorMap: Record<number, DOMElementNode>;
+
+	/**
+	 * Clickable elements
+	 */
+	clickableElements: DOMElementNode[];
 }
 
 /**
@@ -207,6 +192,21 @@ export interface DOMQueryOptions {
 	 * Whether to perform case-sensitive search
 	 */
 	caseSensitive?: boolean;
+
+	/**
+	 * Whether to wait for element to be visible
+	 */
+	waitForVisible?: boolean;
+
+	/**
+	 * Whether to wait for element to be enabled
+	 */
+	waitForEnabled?: boolean;
+
+	/**
+	 * Timeout in milliseconds
+	 */
+	timeout?: number;
 }
 
 /**
@@ -222,6 +222,24 @@ export interface ElementSelector {
 	 * Selector value
 	 */
 	value: string;
+
+	/**
+	 * Element index
+	 */
+	index?: number;
+
+	/**
+	 * Element xpath
+	 */
+	xpath?: string;
+
+	/**
+	 * Element coordinates
+	 */
+	coordinates?: {
+		x: number;
+		y: number;
+	};
 }
 
 /**
@@ -242,4 +260,9 @@ export interface DOMObservation {
 	 * Selector map
 	 */
 	selectorMap: Record<number, DOMElementNode>;
+
+	/**
+	 * Clickable elements
+	 */
+	clickableElements: DOMElementNode[];
 }

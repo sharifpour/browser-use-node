@@ -3,8 +3,7 @@
  */
 
 import type { Page, Browser as PlaywrightBrowserType, BrowserContext as PlaywrightContextType } from 'playwright';
-import type { Cookie } from 'playwright';
-import type { DOMElementNode, DOMHistoryElement } from "../dom/types";
+import type { DOMElementNode } from "../dom/types";
 
 export type PlaywrightBrowser = PlaywrightBrowserType;
 export type PlaywrightBrowserContext = PlaywrightContextType;
@@ -37,6 +36,9 @@ export interface BrowserSession {
 	context: PlaywrightBrowserContext;
 	state: BrowserState;
 	tabs: TabInfo[];
+	cachedState: {
+		selectorMap: Record<number, DOMElementNode>;
+	};
 }
 
 /**
@@ -157,6 +159,13 @@ export interface BrowserConfig {
 		permissions?: string[];
 		extraHTTPHeaders?: Record<string, string>;
 	};
+
+	/**
+	 * Wait times in milliseconds
+	 */
+	minimumWaitPageLoadTime: number;
+	waitForNetworkIdlePageLoadTime: number;
+	maximumWaitPageLoadTime: number;
 }
 
 /**
