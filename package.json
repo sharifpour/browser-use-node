@@ -1,12 +1,12 @@
 {
 	"name": "browser-use-node",
-	"version": "0.1.8",
+	"version": "0.1.9",
 	"description": "Browser automation powered by LLMs in JavaScript",
 	"main": "dist/index.js",
 	"types": "dist/index.d.ts",
 	"scripts": {
 		"build:binary": "bun run clean && bun --bun build --compile src/index.ts --compile --outfile=dist/browser-use-node",
-		"build": "bun run clean && bun build ./src/index.ts --outdir=dist --target=bun && tsc --emitDeclarationOnly --outDir dist",
+		"build": "bun run clean && bun build ./src/index.ts --outdir=dist --target=bun",
 		"clean": "rm -rf dist",
 		"build:examples": "bun run clean && bun build ./examples/*.ts --outdir=dist/examples --target=node && tsc --emitDeclarationOnly --outDir dist",
 		"test": "bun test",
