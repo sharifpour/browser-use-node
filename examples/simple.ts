@@ -10,10 +10,13 @@ async function main() {
   const browser = new Browser({
     headless: false,
     extraChromiumArgs: [
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--no-sandbox',
-      '--disable-extensions',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins',
+      '--disable-site-isolation-trials',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-blink-features=AutomationControlled',
+      '--disable-blink-features=AutomationControlled',
     ]
   });
 
