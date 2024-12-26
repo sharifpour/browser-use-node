@@ -20,7 +20,7 @@ export type ActionFunction = (params: Record<string, unknown>, browser?: Browser
 export interface RegisteredAction {
 	name: string;
 	description: string;
-	function: ActionFunction;
+	handler: ActionFunction;
 	paramModel: z.ZodType<unknown>;
 	requiresBrowser: boolean;
 }
@@ -31,6 +31,7 @@ export interface RegisteredAction {
 export class Registry {
 	private readonly actions: Map<string, ActionRegistration>;
 	private readonly telemetry: ProductTelemetry;
+	private anonymousCounter: number = 0;
 
 	constructor() {
 		this.actions = new Map();
@@ -70,46 +71,54 @@ export class Registry {
 	 */
 	public action(
 		description: string,
+		func: ActionFunction,
 		options: { paramModel?: z.ZodType<unknown>; requiresBrowser?: boolean } = {}
-	): (func: ActionFunction) => ActionFunction {
-		return (func: ActionFunction): ActionFunction => {
-			const name = this.getFunctionName(func);
-			const paramModel = options.paramModel ?? this.createParamModel(func);
-			const requiresBrowser = options.requiresBrowser ?? false;
+	): ActionFunction {
+		const name = this.generateActionName(func);
+		const paramModel = options.paramModel ?? this.createParamModel(func);
+		const requiresBrowser = options.requiresBrowser ?? false;
 
-			this.validateActionRegistration(name, description, func, paramModel);
+		this.validateActionRegistration(name, description, func, paramModel);
 
-			// Wrap function to handle async/sync
-			const wrappedFunc = async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
-				try {
-					const result = await func(params, browser);
-					return this.validateActionResult(result);
-				} catch (error) {
-					throw this.formatError(error);
-				}
-			};
-
-			this.actions.set(name, {
-				function: wrappedFunc,
-				options: {
-					paramModel: options.paramModel ?? this.createParamModel(func),
-					requiresBrowser: options.requiresBrowser ?? true
-				}
-			});
-
-			// Send telemetry
-			this.telemetry.capture({
-				name: 'controller_registered_functions',
-				properties: {
-					registeredFunctions: [{
-						name,
-						params: paramModel.safeParse({}).success ? {} : paramModel
-					}]
-				}
-			} as ControllerRegisteredFunctionsTelemetryEvent);
-
-			return func;
+		// Wrap function to handle async/sync
+		const wrappedFunc = async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+			try {
+				const result = await func(params, browser);
+				return this.validateActionResult(result);
+			} catch (error) {
+				throw this.formatError(error);
+			}
 		};
+
+		this.actions.set(name, {
+			description,
+			handler: wrappedFunc,
+			options: {
+				paramModel: options.paramModel ?? this.createParamModel(func),
+				requiresBrowser: options.requiresBrowser ?? true
+			}
+		});
+
+		// Send telemetry
+		this.telemetry.capture({
+			name: 'controller_registered_functions',
+			properties: {
+				registeredFunctions: [{
+					name,
+					params: paramModel.safeParse({}).success ? {} : paramModel
+				}]
+			}
+		} as ControllerRegisteredFunctionsTelemetryEvent);
+
+		return func;
+	}
+
+	/**
+	 * Generate a unique name for an action
+	 */
+	private generateActionName(func: ActionFunction): string {
+		if (func.name) return func.name;
+		return `anonymous_${++this.anonymousCounter}`;
 	}
 
 	/**
@@ -137,7 +146,7 @@ export class Registry {
 		}
 
 		try {
-			const result = await action.function(params, browser);
+			const result = await action.handler(params, browser);
 			return this.validateActionResult(result);
 		} catch (error) {
 			throw this.formatError(error);

@@ -60,282 +60,280 @@ export class Controller {
 		// Basic Navigation Actions
 		this.registry.action(
 			'Search Google in the current tab',
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				const validatedParams = SearchGoogleActionSchema.parse(params) as SearchGoogleAction;
+				const page = await browser?.getPage();
+				if (!page) throw new Error('Browser context is required');
+				await page.goto(`https://www.google.com/search?q=${validatedParams.query}`);
+				await page.waitForLoadState();
+				await browser.waitForStableNetwork();
+				const msg = `🔍  Searched for "${validatedParams.query}" in Google`;
+				console.log(msg);
+				return { success: true, extracted_content: msg, include_in_memory: true };
+			},
 			{ paramModel: SearchGoogleActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = SearchGoogleActionSchema.parse(params) as SearchGoogleAction;
-			const page = await browser.getPage();
-			await page.goto(`https://www.google.com/search?q=${validatedParams.query}`);
-			await page.waitForLoadState();
-			await browser.waitForStableNetwork();
-			const msg = `🔍  Searched for "${validatedParams.query}" in Google`;
-			console.log(msg);
-			return { success: true, extracted_content: msg, include_in_memory: true };
-		});
+		);
 
 		this.registry.action(
 			'Navigate to URL in the current tab',
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				const validatedParams = GoToUrlActionSchema.parse(params) as GoToUrlAction;
+				const page = await browser?.getPage();
+				if (!page) throw new Error('Browser context is required');
+				await page.goto(validatedParams.url);
+				await page.waitForLoadState();
+				const msg = `🔗  Navigated to ${validatedParams.url}`;
+				console.log(msg);
+				return { success: true, extracted_content: msg, include_in_memory: true };
+			},
 			{ paramModel: GoToUrlActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = GoToUrlActionSchema.parse(params) as GoToUrlAction;
-			const page = await browser.getPage();
-			await page.goto(validatedParams.url);
-			await page.waitForLoadState();
-			const msg = `🔗  Navigated to ${validatedParams.url}`;
-			console.log(msg);
-			return { success: true, extracted_content: msg, include_in_memory: true };
-		});
+		);
 
 		this.registry.action(
 			'Go back',
+			 async (_: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				const page = await browser?.getPage();
+				if (!page) throw new Error('Browser context is required');
+				await page.goBack();
+				await page.waitForLoadState();
+				const msg = '🔙  Navigated back';
+				console.log(msg);
+				return { success: true, extracted_content: msg, include_in_memory: true };
+			},
 			{ paramModel: z.object({}).strict(), requiresBrowser: true }
-		)(async (_: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const page = await browser.getPage();
-			await page.goBack();
-			await page.waitForLoadState();
-			const msg = '🔙  Navigated back';
-			console.log(msg);
-			return { success: true, extracted_content: msg, include_in_memory: true };
-		});
+		);
 
-		// Element Interaction Actions
 		this.registry.action(
 			'Click element',
-			{ paramModel: ClickElementActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = ClickElementActionSchema.parse(params) as ClickElementAction;
-			const session = await browser.getSession();
-			const state = session.cachedState;
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
+				const validatedParams = ClickElementActionSchema.parse(params) as ClickElementAction;
+				const session = await browser.getSession();
+				const state = session.cachedState;
 
-			if (!(validatedParams.index in state.selectorMap)) {
-				throw new ActionError(
-					`Element with index ${validatedParams.index} does not exist - retry or use alternative actions`,
-					'validation'
-				);
-			}
-
-			const elementNode = state.selectorMap[validatedParams.index];
-			const initialPages = browser.pages.length;
-
-			if (await browser.isFileUploader(elementNode)) {
-				const msg = `Index ${validatedParams.index} - has an element which opens file upload dialog. To upload files please use a specific function to upload files`;
-				console.log(msg);
-				return { success: true, extracted_content: msg, include_in_memory: true };
-			}
-
-			try {
-				await browser.clickElementNode(elementNode);
-				let msg = `🖱️  Clicked index ${validatedParams.index}`;
-				console.log(msg);
-				console.debug(`Element xpath: ${elementNode.xpath}`);
-
-				if (browser.pages.length > initialPages) {
-					const newTabMsg = 'New tab opened - switching to it';
-					msg += ` - ${newTabMsg}`;
-					console.log(newTabMsg);
-					await browser.switchToTab(-1);
+				if (!(validatedParams.index in state.selectorMap)) {
+					throw new Error(`Element index ${validatedParams.index} does not exist - retry or use alternative actions`);
 				}
 
-				return { success: true, extracted_content: msg, include_in_memory: true };
-			} catch (error) {
-				console.warn(`Element no longer available with index ${validatedParams.index} - most likely the page changed`);
-				return { success: false, error: String(error), include_in_memory: true };
-			}
-		});
+				const elementNode = state.selectorMap[validatedParams.index];
+				const initialPages = browser.pages.length;
 
+				if (await browser.isFileUploader(elementNode)) {
+					const msg = `Index ${validatedParams.index} - has an element which opens file upload dialog. To upload files please use a specific function to upload files`;
+					console.log(msg);
+					return { success: true, extracted_content: msg, include_in_memory: true };
+				}
+
+				try {
+					await browser.clickElementNode(elementNode);
+					let msg = `🖱️  Clicked index ${validatedParams.index}`;
+					console.log(msg);
+					console.debug(`Element xpath: ${elementNode.xpath}`);
+
+					if (browser.pages.length > initialPages) {
+						const newTabMsg = 'New tab opened - switching to it';
+						msg += ` - ${newTabMsg}`;
+						console.log(newTabMsg);
+						await browser.switchToTab(-1);
+					}
+
+					return { success: true, extracted_content: msg, include_in_memory: true };
+				} catch (error) {
+					console.warn(`Element no longer available with index ${validatedParams.index} - most likely the page changed`);
+					return { success: false, error: String(error), include_in_memory: true };
+				}
+			},
+			{ paramModel: ClickElementActionSchema, requiresBrowser: true }
+		);
+
+		// Register actions
 		this.registry.action(
 			'Input text into a input interactive element',
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
+				const validatedParams = InputTextActionSchema.parse(params) as InputTextAction;
+				const session = await browser.getSession();
+				const state = session.cachedState;
+
+				if (!(validatedParams.index in state.selectorMap)) {
+					throw new Error(`Element index ${validatedParams.index} does not exist - retry or use alternative actions`);
+				}
+
+				const elementNode = state.selectorMap[validatedParams.index];
+				await browser.inputTextElementNode(elementNode, validatedParams.text);
+				const msg = `⌨️  Input "${validatedParams.text}" into index ${validatedParams.index}`;
+				console.log(msg);
+				console.debug(`Element xpath: ${elementNode.xpath}`);
+				return { success: true, extracted_content: msg, include_in_memory: true };
+			},
 			{ paramModel: InputTextActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = InputTextActionSchema.parse(params) as InputTextAction;
-			const session = await browser.getSession();
-			const state = session.cachedState;
-
-			if (!(validatedParams.index in state.selectorMap)) {
-				throw new Error(`Element index ${validatedParams.index} does not exist - retry or use alternative actions`);
-			}
-
-			const elementNode = state.selectorMap[validatedParams.index];
-			await browser.inputTextElementNode(elementNode, validatedParams.text);
-			const msg = `⌨️  Input "${validatedParams.text}" into index ${validatedParams.index}`;
-			console.log(msg);
-			console.debug(`Element xpath: ${elementNode.xpath}`);
-			return { extracted_content: msg, include_in_memory: true };
-		});
+		);
 
 		// Tab Management Actions
 		this.registry.action(
 			'Switch tab',
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
+				const validatedParams = SwitchTabActionSchema.parse(params) as SwitchTabAction;
+				await browser.switchToTab(validatedParams.pageId);
+				const page = await browser.getPage();
+				if (!page) throw new Error('Failed to get page after switching tabs');
+				await page.waitForLoadState();
+				const msg = `🔄  Switched to tab ${validatedParams.pageId}`;
+				console.log(msg);
+				return { success: true, extracted_content: msg, include_in_memory: true };
+			},
 			{ paramModel: SwitchTabActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = SwitchTabActionSchema.parse(params) as SwitchTabAction;
-			await browser.switchToTab(validatedParams.pageId);
-			const page = await browser.getPage();
-			await page.waitForLoadState();
-			const msg = `🔄  Switched to tab ${validatedParams.pageId}`;
-			console.log(msg);
-			return { extracted_content: msg, include_in_memory: true };
-		});
+		);
 
 		this.registry.action(
 			'Open url in new tab',
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
+				const validatedParams = OpenTabActionSchema.parse(params) as OpenTabAction;
+				await browser.createNewTab(validatedParams.url);
+				const msg = `🔗  Opened new tab with ${validatedParams.url}`;
+				console.log(msg);
+				return { success: true, extracted_content: msg, include_in_memory: true };
+			},
 			{ paramModel: OpenTabActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = OpenTabActionSchema.parse(params) as OpenTabAction;
-			await browser.createNewTab(validatedParams.url);
-			const msg = `🔗  Opened new tab with ${validatedParams.url}`;
-			console.log(msg);
-			return { extracted_content: msg, include_in_memory: true };
-		});
+		);
 
 		// Content Actions
 		this.registry.action(
 			'Extract page content to get the text or markdown',
+			async (_: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
+				const page = await browser.getPage();
+				if (!page) throw new Error('Failed to get page');
+				const content = await page.evaluate(() => document.body.innerText);
+				const msg = `  Extracted page content\n: ${content}\n`;
+				console.log(msg);
+				return { success: true, extracted_content: msg, include_in_memory: false };
+			},
 			{ paramModel: ExtractPageContentActionSchema, requiresBrowser: true }
-		)(async (_: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const page = await browser.getPage();
-			const content = await page.evaluate(() => document.body.innerText);
-			const msg = `��  Extracted page content\n: ${content}\n`;
-			console.log(msg);
-			return { extracted_content: msg, include_in_memory: false };
-		});
+		);
 
 		this.registry.action(
 			'Complete task',
+			async (params: Record<string, unknown>): Promise<ActionResult> => {
+				const validatedParams = DoneActionSchema.parse(params) as DoneAction;
+				return { success: true, extracted_content: validatedParams.text, include_in_memory: true };
+			},
 			{ paramModel: DoneActionSchema, requiresBrowser: false }
-		)(async (params: Record<string, unknown>): Promise<ActionResult> => {
-			const validatedParams = DoneActionSchema.parse(params) as DoneAction;
-			return { is_done: true, extracted_content: validatedParams.text, include_in_memory: true };
-		});
+		);
 
 		this.registry.action(
 			'Scroll down the page by pixel amount - if no amount is specified, scroll down one page',
-			{ paramModel: ScrollActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = ScrollActionSchema.parse(params) as ScrollAction;
-			const page = await browser.getPage();
-			if (validatedParams.amount !== undefined) {
-				await page.evaluate(`window.scrollBy(0, ${validatedParams.amount});`);
-			} else {
-				await page.keyboard.press('PageDown');
-			}
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
+				const validatedParams = ScrollActionSchema.parse(params) as ScrollAction;
+				const page = await browser.getPage();
+				if (!page) throw new Error('Failed to get page');
+				if (validatedParams.amount !== undefined) {
+					await page.evaluate(`window.scrollBy(0, ${validatedParams.amount});`);
+				} else {
+					await page.keyboard.press('PageDown');
+				}
 
-			const amount = validatedParams.amount !== undefined ? `${validatedParams.amount} pixels` : 'one page';
-			const msg = `🔍  Scrolled down the page by ${amount}`;
-			console.log(msg);
-			return { extracted_content: msg, include_in_memory: true };
-		});
+				const amount = validatedParams.amount !== undefined ? `${validatedParams.amount} pixels` : 'one page';
+				const msg = `🔍  Scrolled down the page by ${amount}`;
+				console.log(msg);
+				return { success: true, extracted_content: msg, include_in_memory: true };
+			},
+			{ paramModel: ScrollActionSchema, requiresBrowser: true }
+		);
 
 		this.registry.action(
 			'Scroll up the page by pixel amount - if no amount is specified, scroll up one page',
-			{ paramModel: ScrollActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = ScrollActionSchema.parse(params) as ScrollAction;
-			const page = await browser.getPage();
-			if (validatedParams.amount !== undefined) {
-				await page.evaluate(`window.scrollBy(0, -${validatedParams.amount});`);
-			} else {
-				await page.keyboard.press('PageUp');
-			}
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
+				const validatedParams = ScrollActionSchema.parse(params) as ScrollAction;
+				const page = await browser.getPage();
+				if (!page) throw new Error('Failed to get page');
+				if (validatedParams.amount !== undefined) {
+					await page.evaluate(`window.scrollBy(0, -${validatedParams.amount});`);
+				} else {
+					await page.keyboard.press('PageUp');
+				}
 
-			const amount = validatedParams.amount !== undefined ? `${validatedParams.amount} pixels` : 'one page';
-			const msg = `🔍  Scrolled up the page by ${amount}`;
-			console.log(msg);
-			return { extracted_content: msg, include_in_memory: true };
-		});
+				const amount = validatedParams.amount !== undefined ? `${validatedParams.amount} pixels` : 'one page';
+				const msg = `🔍  Scrolled up the page by ${amount}`;
+				console.log(msg);
+				return { success: true, extracted_content: msg, include_in_memory: true };
+			},
+			{ paramModel: ScrollActionSchema, requiresBrowser: true }
+		);
 
 		this.registry.action(
 			'Send strings of special keys like Backspace, Insert, PageDown, Delete, Enter, Shortcuts such as `Control+o`, `Control+Shift+T` are supported as well.',
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
+				const validatedParams = SendKeysActionSchema.parse(params) as SendKeysAction;
+				const page = await browser.getPage();
+				if (!page) throw new Error('Failed to get page');
+				await page.keyboard.press(validatedParams.keys);
+				const msg = `⌨️  Sent keys: ${validatedParams.keys}`;
+				console.log(msg);
+				return { success: true, extracted_content: msg, include_in_memory: true };
+			},
 			{ paramModel: SendKeysActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = SendKeysActionSchema.parse(params) as SendKeysAction;
-			const page = await browser.getPage();
-			await page.keyboard.press(validatedParams.keys);
-			const msg = `⌨️  Sent keys: ${validatedParams.keys}`;
-			console.log(msg);
-			return { extracted_content: msg, include_in_memory: true };
-		});
+		);
 
 		this.registry.action(
 			'If you dont find something which you want to interact with, scroll to it',
-			{ paramModel: ScrollToTextActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = ScrollToTextActionSchema.parse(params) as ScrollToTextAction;
-			const page = await browser.getPage();
-			try {
-				// Try different locator strategies
-				const locators = [
-					page.getByText(validatedParams.text, { exact: false }),
-					page.locator(`text=${validatedParams.text}`),
-					page.locator(`//*[contains(text(), '${validatedParams.text}')]`)
-				];
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
+				const validatedParams = ScrollToTextActionSchema.parse(params) as ScrollToTextAction;
+				const page = await browser.getPage();
+				if (!page) throw new Error('Failed to get page');
+				try {
+					// Try different locator strategies
+					const locators = [
+						page.getByText(validatedParams.text, { exact: false }),
+						page.locator(`text=${validatedParams.text}`),
+						page.locator(`//*[contains(text(), '${validatedParams.text}')]`)
+					];
 
-				for (const locator of locators) {
-					try {
-						if (await locator.count() > 0 && await locator.first().isVisible()) {
-							await locator.first().scrollIntoViewIfNeeded();
-							await new Promise(resolve => setTimeout(resolve, 500)); // Wait for scroll to complete
-							const msg = `🔍  Scrolled to text: ${validatedParams.text}`;
-							console.log(msg);
-							return { extracted_content: msg, include_in_memory: true };
+					for (const locator of locators) {
+						try {
+							if (await locator.count() > 0 && await locator.first().isVisible()) {
+								await locator.first().scrollIntoViewIfNeeded();
+								await new Promise(resolve => setTimeout(resolve, 500)); // Wait for scroll to complete
+								const msg = `🔍  Scrolled to text: ${validatedParams.text}`;
+								console.log(msg);
+								return { success: true, extracted_content: msg, include_in_memory: true };
+							}
+						} catch {
+							// Try next locator
 						}
-					} catch {
-						// Try next locator
 					}
+					return { success: false, error: `Could not find text: ${validatedParams.text}`, include_in_memory: true };
+				} catch (error) {
+					return { success: false, error: String(error), include_in_memory: true };
 				}
-				return { error: `Could not find text: ${validatedParams.text}`, include_in_memory: true };
-			} catch (error) {
-				return { error: String(error), include_in_memory: true };
-			}
-		});
+			},
+			{ paramModel: ScrollToTextActionSchema, requiresBrowser: true }
+		);
 
 		this.registry.action(
 			'Get all options from a native dropdown',
-			{ paramModel: GetDropdownOptionsActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = GetDropdownOptionsActionSchema.parse(params) as GetDropdownOptionsAction;
-			const session = await browser.getSession();
-			const state = session.cachedState;
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
+				const validatedParams = GetDropdownOptionsActionSchema.parse(params) as GetDropdownOptionsAction;
+				const session = await browser.getSession();
+				const state = session.cachedState;
 
-			if (!(validatedParams.index in state.selectorMap)) {
-				throw new Error(`Element index ${validatedParams.index} does not exist - retry or use alternative actions`);
-			}
+				if (!(validatedParams.index in state.selectorMap)) {
+					throw new Error(`Element index ${validatedParams.index} does not exist - retry or use alternative actions`);
+				}
 
-			const elementNode = state.selectorMap[validatedParams.index];
-			const page = await browser.getPage();
+				const elementNode = state.selectorMap[validatedParams.index];
+				const page = await browser.getPage();
+				if (!page) throw new Error('Failed to get page');
 
-			try {
-				const options = Array.from(element.options).map(option => ({
-					value: option.value,
-					text: option.text
-				}));
-
-				const msg = `📝 Available options for dropdown ${validatedParams.index}:\n${options.map(opt => `- ${opt.text} (${opt.value})${opt.selected ? ' [selected]' : ''}`).join('\n')
-					}`;
-				console.log(msg);
-				return { extracted_content: msg, include_in_memory: true };
-			} catch (error) {
-				return { error: String(error), include_in_memory: true };
-			}
-		});
-
-		this.registry.action(
-			'Select dropdown option for interactive element index by the text of the option you want to select',
-			{ paramModel: SelectDropdownOptionActionSchema, requiresBrowser: true }
-		)(async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
-			const validatedParams = SelectDropdownOptionActionSchema.parse(params) as SelectDropdownOptionAction;
-			const session = await browser.getSession();
-			const state = session.cachedState;
-
-			if (!(validatedParams.index in state.selectorMap)) {
-				throw new Error(`Element index ${validatedParams.index} does not exist - retry or use alternative actions`);
-			}
-
-			const elementNode = state.selectorMap[validatedParams.index];
-			const page = await browser.getPage();
-
-			try {
-				await page.evaluate(
-					({ xpath, text }) => {
+				try {
+					const options = await page.evaluate((xpath) => {
 						const element = document.evaluate(
 							xpath,
 							document,
@@ -348,34 +346,29 @@ export class Controller {
 							throw new Error('Element is not a select dropdown');
 						}
 
-						const option = Array.from(element.options).find(opt =>
-							opt.text.toLowerCase() === text.toLowerCase() ||
-							opt.value.toLowerCase() === text.toLowerCase()
-						);
+						return Array.from(element.options).map(option => ({
+							value: option.value,
+							text: option.text,
+							selected: option.selected
+						}));
+					}, elementNode.xpath);
 
-						if (!option) {
-							throw new Error(`Option with text "${text}" not found`);
-						}
-
-						element.value = option.value;
-						element.dispatchEvent(new Event('change', { bubbles: true }));
-					},
-					{ xpath: elementNode.xpath, text: validatedParams.text }
-				);
-
-				const msg = `📝 Available options for dropdown ${validatedParams.index}:\n${
-					options.map(opt => `- ${opt.text} (${opt.value})${opt.selected ? ' [selected]' : ''}`).join('\n')
-				}`;
-				console.log(msg);
-				return { extracted_content: msg, include_in_memory: true };
-			} catch (error) {
-				return { error: String(error), include_in_memory: true };
-			}
-		});
+					const msg = `📝 Available options for dropdown ${validatedParams.index}:\n${
+						options.map(opt => `- ${opt.text} (${opt.value})${opt.selected ? ' [selected]' : ''}`).join('\n')
+					}`;
+					console.log(msg);
+					return { success: true, extracted_content: msg, include_in_memory: true };
+				} catch (error) {
+					return { success: false, error: String(error), include_in_memory: true };
+				}
+			},
+			{ paramModel: GetDropdownOptionsActionSchema, requiresBrowser: true }
+		);
 
 		this.registry.action(
 			'Select dropdown option for interactive element index by the text of the option you want to select',
-			async (params: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
+			async (params: Record<string, unknown>, browser?: BrowserContext): Promise<ActionResult> => {
+				if (!browser) throw new Error('Browser context is required');
 				const validatedParams = SelectDropdownOptionActionSchema.parse(params) as SelectDropdownOptionAction;
 				const session = await browser.getSession();
 				const state = session.cachedState;
@@ -386,6 +379,7 @@ export class Controller {
 
 				const elementNode = state.selectorMap[validatedParams.index];
 				const page = await browser.getPage();
+				if (!page) throw new Error('Failed to get page');
 
 				try {
 					await page.evaluate(
@@ -419,9 +413,9 @@ export class Controller {
 
 					const msg = `📝 Selected option "${validatedParams.text}" in dropdown ${validatedParams.index}`;
 					console.log(msg);
-					return { extracted_content: msg, include_in_memory: true };
+					return { success: true, extracted_content: msg, include_in_memory: true };
 				} catch (error) {
-					return { error: String(error), include_in_memory: true };
+					return { success: false, error: String(error), include_in_memory: true };
 				}
 			},
 			{ paramModel: SelectDropdownOptionActionSchema, requiresBrowser: true }

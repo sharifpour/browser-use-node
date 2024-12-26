@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ChatOpenAI } from 'langchain/chat_models/openai';
 
 /**
  * Browser configuration schema with validation
@@ -9,37 +10,43 @@ export const BrowserConfigSchema = z.object({
 	/** Whether to disable browser security features */
 	disableSecurity: z.boolean().optional().default(true),
 	/** Additional Chromium arguments */
-	extraChromiumArgs: z.array(z.string()).optional(),
-	/** Path to cookies file for persistence */
-	cookiesFile: z.string().optional(),
-	/** Minimum time to wait for page load in milliseconds */
-	minimumWaitPageLoadTime: z.number().optional().default(500),
-	/** Time to wait for network idle in milliseconds */
-	waitForNetworkIdlePageLoadTime: z.number().optional().default(1000),
-	/** Maximum time to wait for page load in milliseconds */
-	maximumWaitPageLoadTime: z.number().optional().default(5000),
-	/** Recording configuration */
-	recording: z.object({
-		/** Whether recording is enabled */
-		enabled: z.boolean(),
-		/** Path to recording file */
-		path: z.string(),
-		/** Recording options */
-		options: z.record(z.unknown()).optional()
+	extraChromiumArgs: z.array(z.string()).optional().default([]),
+	/** Path to Chrome instance for connecting to normal browser */
+	chromeInstancePath: z.string().optional(),
+	/** WebSocket URL for connecting to browser */
+	wssUrl: z.string().optional(),
+	/** Proxy settings */
+	proxy: z.object({
+		server: z.string(),
+		bypass: z.string().optional(),
+		username: z.string().optional(),
+		password: z.string().optional()
 	}).optional(),
-	/** Trace configuration */
-	trace: z.object({
-		/** Whether tracing is enabled */
-		enabled: z.boolean(),
-		/** Path to trace file */
-		path: z.string()
-	}).optional(),
-	/** Viewport configuration */
-	viewport: z.object({
-		/** Viewport width */
-		width: z.number(),
-		/** Viewport height */
-		height: z.number()
+	/** Default configuration for new browser contexts */
+	newContextConfig: z.object({
+		/** Path to cookies file for persistence */
+		cookiesFile: z.string().optional(),
+		/** Minimum time to wait for page load in seconds */
+		minimumWaitPageLoadTime: z.number().optional().default(0.5),
+		/** Time to wait for network idle in seconds */
+		waitForNetworkIdlePageLoadTime: z.number().optional().default(1.0),
+		/** Maximum time to wait for page load in seconds */
+		maximumWaitPageLoadTime: z.number().optional().default(5.0),
+		/** Time to wait between actions in seconds */
+		waitBetweenActions: z.number().optional().default(1.0),
+		/** Browser window size */
+		browserWindowSize: z.object({
+			width: z.number(),
+			height: z.number()
+		}).optional().default({ width: 1280, height: 1100 }),
+		/** Whether to disable viewport */
+		noViewport: z.boolean().optional().default(false),
+		/** Path to save video recordings */
+		saveRecordingPath: z.string().optional(),
+		/** Path to save trace files */
+		tracePath: z.string().optional(),
+		/** Whether to save screenshots */
+		saveScreenshots: z.boolean().optional().default(false)
 	}).optional()
 });
 
@@ -112,6 +119,4 @@ export interface BaseMessage {
 	constructor: { name: string };
 }
 
-export interface BaseChatModel {
-	generateStructuredOutput<T>(messages: BaseMessage[], outputSchema: string): Promise<{ parsed: T }>;
-}
+export type BaseChatModel = ChatOpenAI;

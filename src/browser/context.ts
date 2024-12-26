@@ -118,9 +118,12 @@ export class BrowserContext {
 	private eventHandlers: Partial<Record<PageEventType, PageEventHandler[keyof PageEventHandler][]>> = {};
 	private securityService: SecurityService;
 	private currentState: BrowserState | null = null;
+	private isInitialized = false;
+	private isClosing = false;
 
 	constructor(browser: Browser, config: Partial<BrowserContextConfig> = {}) {
 		this.contextId = uuidv4();
+		logger.debug(`Initializing new browser context with id: ${this.contextId}`);
 		this.config = {
 			...DEFAULT_CONFIG,
 			...config
@@ -139,6 +142,185 @@ export class BrowserContext {
 				sameSite: 'Strict' as const
 			})
 		};
+	}
+
+	/**
+	 * Async context manager entry
+	 */
+	async enter(): Promise<this> {
+		await this._initializeSession();
+		return this;
+	}
+
+	/**
+	 * Async context manager exit
+	 */
+	async exit(error?: Error): Promise<void> {
+		await this.close();
+	}
+
+	/**
+	 * Initialize the browser session
+	 */
+	private async _initializeSession(): Promise<BrowserSession> {
+		if (this.isInitialized) {
+			return this.session as BrowserSession;
+		}
+
+		logger.debug('Initializing browser context');
+
+		const playwrightBrowser = await this.browser.getPlaywrightBrowser();
+		const context = await this._createContext(playwrightBrowser);
+		const page = await context.newPage();
+
+		// Create initial empty state
+		const initialState: BrowserState = {
+			url: page.url(),
+			title: await page.title(),
+			tabs: [],
+			domTree: {
+				tagName: 'root',
+				isVisible: true,
+				xpath: '',
+				attributes: {},
+				children: []
+			},
+			clickableElements: [],
+			selectorMap: {},
+			screenshot: undefined
+		};
+
+		this.context = context;
+		this.currentPage = page;
+		this.session = {
+			cachedState: {
+				selectorMap: {}
+			}
+		};
+		this.currentState = initialState;
+
+		// Add page event listener
+		await this._addNewPageListener(context);
+
+		this.isInitialized = true;
+		return {
+			context,
+			state: initialState,
+			tabs: await this.getTabs(),
+			cachedState: this.session.cachedState
+		};
+	}
+
+	/**
+	 * Get the current session
+	 */
+	async getSession(): Promise<BrowserSession> {
+		if (!this.isInitialized) {
+			return this._initializeSession();
+		}
+
+		const state = this.currentState || {
+			url: this.currentPage?.url(),
+			title: await this.currentPage?.title(),
+			selectorMap: this.session.cachedState.selectorMap
+		};
+
+		return {
+			context: this.context as PlaywrightContext,
+			state,
+			tabs: await this.getTabs(),
+			cachedState: this.session.cachedState
+		};
+	}
+
+	/**
+	 * Close the browser context and clean up resources
+	 */
+	public async close(): Promise<void> {
+		if (this.isClosing) {
+			return;
+		}
+
+		this.isClosing = true;
+		logger.debug('Closing browser context');
+
+		try {
+			if (!this.isInitialized) {
+				return;
+			}
+
+			await this.saveCookies();
+
+			if (this.config.tracePath && this.context) {
+				try {
+					await this.context.tracing.stop({
+						path: path.join(this.config.tracePath, `${this.contextId}.zip`)
+					});
+				} catch (error) {
+					logger.debug(`Failed to stop tracing: ${error}`);
+				}
+			}
+
+			if (this.currentPage) {
+				try {
+					await this.currentPage.close();
+				} catch (error) {
+					logger.debug(`Failed to close page: ${error}`);
+				}
+				this.currentPage = null;
+			}
+
+			if (this.context) {
+				try {
+					await this.context.close();
+				} catch (error) {
+					logger.debug(`Failed to close context: ${error}`);
+				}
+				this.context = null;
+			}
+
+			this.domService = null;
+			this.currentState = null;
+			this.session = {
+				cachedState: {
+					selectorMap: {}
+				}
+			};
+			this.isInitialized = false;
+		} catch (error) {
+			logger.error('Error closing browser context:', error);
+		} finally {
+			this.isClosing = false;
+		}
+	}
+
+	/**
+	 * Cleanup when object is destroyed
+	 */
+	async cleanup(): Promise<void> {
+		if (this.isInitialized && !this.isClosing) {
+			logger.debug('BrowserContext was not properly closed before destruction');
+			try {
+				// Try to get running event loop
+				let loop: any;
+				try {
+					loop = (global as any).process._getActiveHandles?.();
+				} catch {
+					// Ignore error
+				}
+
+				if (loop?.length > 0) {
+					// Event loop is running, create task
+					loop[0].unref();
+					await this.close();
+				} else {
+					// No event loop, run sync
+					await this.close();
+				}
+			} catch (error) {
+				logger.warning(`Failed to force close browser context: ${error}`);
+			}
+		}
 	}
 
 	/**
@@ -308,26 +490,6 @@ export class BrowserContext {
 	}
 
 	/**
-	 * Get the current session
-	 */
-	async getSession(): Promise<BrowserSession> {
-		if (!this.context) {
-			await this.init();
-		}
-		const state = this.currentState || {
-			url: this.currentPage?.url(),
-			title: await this.currentPage?.title(),
-			selectorMap: this.session.cachedState.selectorMap
-		};
-		return {
-			context: this.context as PlaywrightContext,
-			state,
-			tabs: await this.getTabs(),
-			cachedState: this.session.cachedState
-		};
-	}
-
-	/**
 	 * Get the current state of the browser
 	 * @param useVision Whether to include a screenshot in the state
 	 */
@@ -403,36 +565,210 @@ export class BrowserContext {
 	}
 
 	/**
-	 * Wait for page load with network idle detection
-	 * @param timeoutOverwrite Optional timeout override in milliseconds
+	 * Wait for network to become stable
 	 */
-	private async waitForPageLoad(timeoutOverwrite?: number): Promise<void> {
-		const startTime = Date.now();
+	private async waitForStableNetwork(): Promise<void> {
 		const page = await this.getPage();
 
-		try {
-			// Wait for network to be idle
-			await page.waitForLoadState('networkidle', {
-				timeout: (this.config.maximumWaitPageLoadTime || 5.0) * 1000
-			});
+		const pendingRequests = new Set<Request>();
+		let lastActivity = Date.now() / 1000;
 
-			// Calculate remaining time to meet minimum wait time
-			const elapsed = (Date.now() - startTime) / 1000;
-			const remaining = Math.max(
-				((timeoutOverwrite ?? (this.config.minimumWaitPageLoadTime || 0.5)) - elapsed) * 1000,
-				0
-			);
+		// Define relevant resource types and content types
+		const RELEVANT_RESOURCE_TYPES = new Set([
+			'document',
+			'stylesheet',
+			'image',
+			'font',
+			'script',
+			'iframe'
+		]);
 
-			console.debug(
-				`--Page loaded in ${elapsed.toFixed(2)} seconds, waiting for additional ${(remaining / 1000).toFixed(2)} seconds`
-			);
+		const RELEVANT_CONTENT_TYPES = new Set([
+			'text/html',
+			'text/css',
+			'application/javascript',
+			'image/',
+			'font/',
+			'application/json'
+		]);
 
-			// Sleep remaining time if needed
-			if (remaining > 0) {
-				await new Promise(resolve => setTimeout(resolve, remaining));
+		// Additional patterns to filter out
+		const IGNORED_URL_PATTERNS = new Set([
+			// Analytics and tracking
+			'analytics',
+			'tracking',
+			'telemetry',
+			'beacon',
+			'metrics',
+			// Ad-related
+			'doubleclick',
+			'adsystem',
+			'adserver',
+			'advertising',
+			// Social media widgets
+			'facebook.com/plugins',
+			'platform.twitter',
+			'linkedin.com/embed',
+			// Live chat and support
+			'livechat',
+			'zendesk',
+			'intercom',
+			'crisp.chat',
+			'hotjar',
+			// Push notifications
+			'push-notifications',
+			'onesignal',
+			'pushwoosh',
+			// Background sync/heartbeat
+			'heartbeat',
+			'ping',
+			'alive',
+			// WebRTC and streaming
+			'webrtc',
+			'rtmp://',
+			'wss://',
+			// Common CDNs for dynamic content
+			'cloudfront.net',
+			'fastly.net'
+		]);
+
+		const onRequest = async (request: Request) => {
+			// Filter by resource type
+			if (!RELEVANT_RESOURCE_TYPES.has(request.resourceType())) {
+				return;
 			}
+
+			// Filter out streaming, websocket, and other real-time requests
+			if (['websocket', 'media', 'eventsource', 'manifest', 'other'].includes(request.resourceType())) {
+				return;
+			}
+
+			// Filter out by URL patterns
+			const url = request.url().toLowerCase();
+			if ([...IGNORED_URL_PATTERNS].some(pattern => url.includes(pattern))) {
+				return;
+			}
+
+			// Filter out data URLs and blob URLs
+			if (url.startsWith('data:') || url.startsWith('blob:')) {
+				return;
+			}
+
+			// Filter out requests with certain headers
+			const headers = request.headers();
+			if (headers['purpose'] === 'prefetch' || headers['sec-fetch-dest'] === 'video' || headers['sec-fetch-dest'] === 'audio') {
+				return;
+			}
+
+			pendingRequests.add(request);
+			lastActivity = Date.now() / 1000;
+			logger.debug(`Request started: ${request.url()} (${request.resourceType()})`);
+		};
+
+		const onResponse = async (response: Response) => {
+			const request = response.request();
+			if (!pendingRequests.has(request)) {
+				return;
+			}
+
+			// Filter by content type if available
+			const contentType = response.headers()['content-type']?.toLowerCase() || '';
+
+			// Skip if content type indicates streaming or real-time data
+			if ([
+				'streaming',
+				'video',
+				'audio',
+				'webm',
+				'mp4',
+				'event-stream',
+				'websocket',
+				'protobuf'
+			].some(t => contentType.includes(t))) {
+				pendingRequests.delete(request);
+				return;
+			}
+
+			// Only process relevant content types
+			if (![...RELEVANT_CONTENT_TYPES].some(ct => contentType.includes(ct))) {
+				pendingRequests.delete(request);
+				return;
+			}
+
+			// Skip if response is too large (likely not essential for page load)
+			const contentLength = response.headers()['content-length'];
+			if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) { // 5MB
+				pendingRequests.delete(request);
+				return;
+			}
+
+			pendingRequests.delete(request);
+			lastActivity = Date.now() / 1000;
+			logger.debug(`Request resolved: ${request.url()} (${contentType})`);
+		};
+
+		// Attach event listeners
+		page.on('request', onRequest);
+		page.on('response', onResponse);
+
+		try {
+			// Wait for idle time
+			const startTime = Date.now() / 1000;
+			while (true) {
+				await new Promise(resolve => setTimeout(resolve, 100));
+				const now = Date.now() / 1000;
+				if (
+					pendingRequests.size === 0 &&
+					(now - lastActivity) >= (this.config.waitForNetworkIdlePageLoadTime || 1.0)
+				) {
+					break;
+				}
+				if (now - startTime > (this.config.maximumWaitPageLoadTime || 5.0)) {
+					logger.debug(
+						`Network timeout after ${this.config.maximumWaitPageLoadTime}s with ${pendingRequests.size} ` +
+							`pending requests: ${[...pendingRequests].map(r => r.url())}`
+					);
+					break;
+				}
+			}
+		} finally {
+			// Clean up event listeners
+			page.removeListener('request', onRequest);
+			page.removeListener('response', onResponse);
+		}
+
+		logger.debug(
+			`Network stabilized for ${this.config.waitForNetworkIdlePageLoadTime} seconds`
+		);
+	}
+
+	/**
+	 * Wait for page load with network idle detection
+	 * @param timeoutOverwrite Optional timeout override in seconds
+	 */
+	private async waitForPageLoad(timeoutOverwrite?: number): Promise<void> {
+		const startTime = Date.now() / 1000;
+
+		try {
+			await this.waitForStableNetwork();
 		} catch (error) {
-			console.warn('Page load failed, continuing...', error);
+			logger.warning('Page load failed, continuing...', error);
+		}
+
+		// Calculate remaining time to meet minimum wait time
+		const elapsed = Date.now() / 1000 - startTime;
+		const remaining = Math.max(
+			(timeoutOverwrite ?? this.config.minimumWaitPageLoadTime || 0.5) - elapsed,
+			0
+		);
+
+		logger.debug(
+			`--Page loaded in ${elapsed.toFixed(2)} seconds, waiting for additional ${remaining.toFixed(2)} seconds`
+		);
+
+		// Sleep remaining time if needed
+		if (remaining > 0) {
+			await new Promise(resolve => setTimeout(resolve, remaining * 1000));
 		}
 	}
 
@@ -1713,120 +2049,5 @@ export class BrowserContext {
 			await this.init();
 		}
 		return this.context;
-	}
-
-	/**
-	 * Wait for network to become stable
-	 */
-	public async waitForStableNetwork(): Promise<void> {
-		const page = await this.getPage();
-		const pendingRequests = new Set<Request>();
-		let lastActivity = Date.now();
-
-		const onRequest = (request: Request) => {
-			pendingRequests.add(request);
-			lastActivity = Date.now();
-		};
-
-		const onResponse = async (response: Response) => {
-			const request = response.request();
-			if (!pendingRequests.has(request)) {
-				return;
-			}
-
-			// Filter by content type if available
-			const contentType = response.headers()['content-type']?.toLowerCase() || '';
-
-			// Skip if content type indicates streaming or real-time data
-			if (
-				contentType.includes('streaming') ||
-				contentType.includes('video') ||
-				contentType.includes('audio') ||
-				contentType.includes('webm') ||
-				contentType.includes('mp4') ||
-				contentType.includes('event-stream') ||
-				contentType.includes('websocket') ||
-				contentType.includes('protobuf')
-			) {
-				pendingRequests.delete(request);
-				return;
-			}
-
-			// Skip if response is too large (likely not essential for page load)
-			const contentLength = response.headers()['content-length'];
-			if (contentLength && Number.parseInt(contentLength) > 5 * 1024 * 1024) { // 5MB
-				pendingRequests.delete(request);
-				return;
-			}
-
-			pendingRequests.delete(request);
-			lastActivity = Date.now();
-		};
-
-		// Attach event listeners
-		page.on('request', onRequest);
-		page.on('response', onResponse);
-
-		try {
-			// Wait for idle time
-			const startTime = Date.now();
-			while (true) {
-				await new Promise(resolve => setTimeout(resolve, 100));
-				const now = Date.now();
-				if (
-					pendingRequests.size === 0 &&
-					(now - lastActivity) >= (this.config.waitForNetworkIdlePageLoadTime || 1.0) * 1000
-				) {
-					break;
-				}
-				if (now - startTime > (this.config.maximumWaitPageLoadTime || 5.0) * 1000) {
-					logger.debug(
-						`Network timeout after ${this.config.maximumWaitPageLoadTime}s with ${pendingRequests.size} ` +
-							`pending requests: ${[...pendingRequests].map(r => r.url())}`
-					);
-					break;
-				}
-			}
-		} finally {
-			// Clean up event listeners
-			page.removeListener('request', onRequest);
-			page.removeListener('response', onResponse);
-		}
-
-		logger.debug(
-			`Network stabilized for ${this.config.waitForNetworkIdlePageLoadTime} seconds`
-		);
-	}
-
-	/**
-	 * Remove highlights from the page
-	 */
-	private async removeHighlights(): Promise<void> {
-		const page = await this.getPage();
-		await page.evaluate(() => {
-			const highlights = document.querySelectorAll('.highlight-element');
-			highlights.forEach(el => el.classList.remove('highlight-element'));
-		});
-	}
-
-	/**
-	 * Get the current page, creating a new one if necessary
-	 */
-	private async getPage(): Promise<Page> {
-		if (!this.currentPage) {
-			if (!this.context) {
-				await this.init();
-			}
-			this.currentPage = await this.context!.newPage();
-
-			// Set default timeout
-			this.currentPage.setDefaultTimeout(this.config.maximumWaitPageLoadTime * 1000);
-
-			// Set viewport size
-			if (this.config.browserWindowSize) {
-				await this.currentPage.setViewportSize(this.config.browserWindowSize);
-			}
-		}
-		return this.currentPage;
 	}
 }

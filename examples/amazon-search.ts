@@ -1,101 +1,62 @@
-import { Browser, Page } from 'browser-use-node';
-
-interface Product {
-    title: string | undefined;
-    price: string | undefined;
-    rating: string | undefined;
-}
-
-// Function to extract product information
-async function getProductInfo(page: Page): Promise<Product[]> {
-    return page.evaluate(() => {
-        const products: Product[] = [];
-        const items = document.querySelectorAll('[data-component-type="s-search-result"]');
-
-        items.forEach((item, index) => {
-            if (index < 5) { // Get top 5 results
-                const titleElement = item.querySelector('h2 a span');
-                const priceElement = item.querySelector('.a-price-whole');
-                const ratingElement = item.querySelector('.a-icon-star-small .a-icon-alt');
-
-                products.push({
-                    title: titleElement?.textContent?.trim(),
-                    price: priceElement?.textContent?.trim(),
-                    rating: ratingElement?.textContent?.trim()
-                });
-            }
-        });
-
-        return products;
-    });
-}
+import { ChatOpenAI } from 'langchain/chat_models/openai';
+import { Browser } from '../src/browser/browser';
+import { BrowserContext } from '../src/browser/context';
+import { Controller } from '../src/controller/controller';
+import { Agent } from '../src/agent/agent';
 
 async function main() {
-    const browser = new Browser({
-        headless: false
-    });
+	// Initialize OpenAI
+	const llm = new ChatOpenAI({
+		modelName: 'gpt-4',
+		temperature: 0,
+		maxTokens: -1
+	});
 
-    try {
-        const context = await browser.newContext();
+	// Initialize browser components
+	const browser = new Browser();
+	const context = new BrowserContext(browser);
+	const controller = new Controller();
 
-        // Create multiple pages for different product searches
-        const laptopPage = await context.newPage();
-        const phonePage = await context.newPage();
-        const tabletPage = await context.newPage();
+	// Get action descriptions
+	const actionDescriptions = controller.getActionDescriptions();
 
-        // Search for laptops
-        await laptopPage.goto('https://www.amazon.com');
-        await laptopPage.type('#twotabsearchtextbox', 'laptop');
-        await laptopPage.keyboard.press('Enter');
-        await laptopPage.waitForLoadState('networkidle');
+	// Initialize agent
+	const agent = new Agent({
+		llm,
+		task: 'Go to Amazon.com and search for "gaming laptop". Extract the title and price of the first result.',
+		actionDescriptions,
+		maxSteps: 5,
+		maxActionsPerStep: 3,
+		maxInputTokens: 128000
+	});
 
-        // Search for phones
-        await phonePage.goto('https://www.amazon.com');
-        await phonePage.type('#twotabsearchtextbox', 'smartphone');
-        await phonePage.keyboard.press('Enter');
-        await phonePage.waitForLoadState('networkidle');
+	try {
+		let state = await context.getState();
+		let result = null;
 
-        // Search for tablets
-        await tabletPage.goto('https://www.amazon.com');
-        await tabletPage.type('#twotabsearchtextbox', 'tablet');
-        await tabletPage.keyboard.press('Enter');
-        await tabletPage.waitForLoadState('networkidle');
+		while (true) {
+			// Get next action from agent
+			const actions = await agent.getNextAction(state, result);
+			console.log('Actions:', actions);
 
-        // Get product information from all pages
-        const laptops = await getProductInfo(laptopPage);
-        const phones = await getProductInfo(phonePage);
-        const tablets = await getProductInfo(tabletPage);
+			// Execute actions
+			result = await controller.multiAct(actions, context);
+			console.log('Result:', result);
 
-        // Print results
-        console.log('\nTop 5 Laptops:');
-        console.log('==============');
-        laptops.forEach((product, index) => {
-            console.log(`${index + 1}. ${product.title}`);
-            console.log(`   Price: $${product.price}`);
-            console.log(`   Rating: ${product.rating}\n`);
-        });
+			// Update state
+			state = await context.getState();
 
-        console.log('\nTop 5 Smartphones:');
-        console.log('==================');
-        phones.forEach((product, index) => {
-            console.log(`${index + 1}. ${product.title}`);
-            console.log(`   Price: $${product.price}`);
-            console.log(`   Rating: ${product.rating}\n`);
-        });
-
-        console.log('\nTop 5 Tablets:');
-        console.log('==============');
-        tablets.forEach((product, index) => {
-            console.log(`${index + 1}. ${product.title}`);
-            console.log(`   Price: $${product.price}`);
-            console.log(`   Rating: ${product.rating}\n`);
-        });
-
-    } finally {
-        await browser.close();
-    }
+			// Check if we're done
+			if (result.some(r => r.is_done)) {
+				console.log('Task completed');
+				break;
+			}
+		}
+	} catch (error) {
+		console.error('Error:', error);
+	} finally {
+		await browser.close();
+	}
 }
 
-if (require.main === module) {
-    main().catch(console.error);
-}
+main().catch(console.error);

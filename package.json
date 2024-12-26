@@ -6,7 +6,8 @@
 	"types": "dist/index.d.ts",
 	"scripts": {
 		"build:binary": "bun run clean && bun --bun build --compile src/index.ts --compile --outfile=dist/browser-use-node",
-		"build": "bun run clean && bun build ./src/index.ts --outdir=dist --target=bun",
+		"build:examples-binary": "bun run clean && bun run scripts/compile-examples.ts",
+		"build": "bun run clean && bun build ./src/index.ts --outdir=dist --target=bun --sourcemap",
 		"clean": "rm -rf dist",
 		"build:examples": "bun run clean && bun build ./examples/*.ts --outdir=dist/examples --target=node && tsc --emitDeclarationOnly --outDir dist",
 		"test": "bun test",
@@ -19,7 +20,7 @@
 		"test:smoke": "bun test tests/smoke/smoke.test.ts",
 		"deploy:staging": "node scripts/deploy.js staging",
 		"deploy:production": "node scripts/deploy.js production",
-		"type-check": "tsc --noEmit"
+		"type-check": "bun tsc --noEmit"
 	},
 	"files": ["dist", "README.md", "LICENSE"],
 	"keywords": [

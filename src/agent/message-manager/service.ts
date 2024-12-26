@@ -1,48 +1,13 @@
-/**
- * Message manager for handling agent messages
- */
-
 import type { ChatOpenAI } from 'langchain/chat_models/openai';
 import type { BaseMessage } from 'langchain/schema';
-import type { SystemPrompt } from './prompts';
-import type { AgentOutput, AgentStepInfo } from './types';
-import type { BrowserState } from '../browser/types';
-import type { ActionResult } from '../controller/types';
-import { AgentMessagePrompt } from './prompts';
+import type { SystemPrompt } from '../prompts';
+import type { AgentOutput, AgentStepInfo } from '../types';
+import type { BrowserState } from '../../browser/types';
+import type { ActionResult } from '../../controller/types';
+import { AgentMessagePrompt } from '../prompts';
 import { AIMessage as AIMessageClass, HumanMessage as HumanMessageClass } from 'langchain/schema';
-
-export interface MessageMetadata {
-	inputTokens: number;
-	timestamp: string;
-	type: 'system' | 'human' | 'assistant';
-}
-
-export interface ManagedMessage {
-	message: BaseMessage;
-	metadata: MessageMetadata;
-}
-
-export interface MessageHistory {
-	messages: ManagedMessage[];
-	totalTokens: number;
-	removeMessage(index?: number): void;
-}
-
-class MessageHistoryImpl implements MessageHistory {
-	messages: ManagedMessage[] = [];
-	totalTokens: number = 0;
-
-	removeMessage(index = -1): void {
-		if (index < 0) {
-			index = this.messages.length + index;
-		}
-		if (index >= 0 && index < this.messages.length) {
-			const msg = this.messages[index];
-			this.totalTokens -= msg.metadata.inputTokens;
-			this.messages.splice(index, 1);
-		}
-	}
-}
+import { MessageHistoryImpl } from './types';
+import type { MessageMetadata } from './types';
 
 export interface MessageManagerConfig {
 	llm: ChatOpenAI;
@@ -60,8 +25,8 @@ export interface MessageManagerConfig {
 export class MessageManager {
 	private readonly llm: ChatOpenAI;
 	private readonly systemPromptClass: typeof SystemPrompt;
-	private readonly maxInputTokens: number;
-	private readonly history: MessageHistory;
+	private maxInputTokens: number;
+	private readonly history: MessageHistoryImpl;
 	private readonly task: string;
 	private readonly actionDescriptions: string;
 	private readonly ESTIMATED_TOKENS_PER_CHARACTER: number;
@@ -263,7 +228,7 @@ export class MessageManager {
 
 	private async addMessageWithTokens(message: BaseMessage, type: MessageMetadata['type']): Promise<void> {
 		const tokens = await this.countTokens(message);
-		const managedMessage: ManagedMessage = {
+		const managedMessage = {
 			message,
 			metadata: {
 				inputTokens: tokens,
@@ -283,7 +248,7 @@ export class MessageManager {
 	private addMessageWithTokensSync(message: BaseMessage, type: MessageMetadata['type']): void {
 		// Only used in constructor and other sync contexts
 		const tokens = this.countTokensSync(message);
-		const managedMessage: ManagedMessage = {
+		const managedMessage = {
 			message,
 			metadata: {
 				inputTokens: tokens,

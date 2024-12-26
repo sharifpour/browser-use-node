@@ -121,51 +121,108 @@ export interface BrowserStateHistory {
  */
 export interface BrowserConfig {
 	/**
-	 * Browser type
+	 * Whether to run browser in headless mode
+	 * @default false
 	 */
-	browserType?: "chromium" | "firefox" | "webkit";
+	headless?: boolean;
 
 	/**
-	 * Path to cookies file for persistence
+	 * Disable browser security features
+	 * @default true
 	 */
-	cookiesFile?: string;
+	disableSecurity?: boolean;
 
 	/**
-	 * Browser launch options
+	 * Extra arguments to pass to the browser
+	 * @default []
 	 */
-	launchOptions?: {
-		headless?: boolean;
-		slowMo?: number;
-		devtools?: boolean;
-		args?: string[];
+	extraChromiumArgs?: string[];
+
+	/**
+	 * Path to a Chrome instance to use to connect to your normal browser
+	 * e.g. '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+	 */
+	chromeInstancePath?: string;
+
+	/**
+	 * Connect to a browser instance via WebSocket
+	 */
+	wssUrl?: string;
+
+	/**
+	 * Proxy settings
+	 */
+	proxy?: {
+		server: string;
+		bypass?: string;
+		username?: string;
+		password?: string;
 	};
 
 	/**
-	 * Browser context options
+	 * Default configuration for new browser contexts
 	 */
-	contextOptions?: {
-		viewport?: {
+	newContextConfig?: {
+		/**
+		 * Path to cookies file for persistence
+		 */
+		cookiesFile?: string;
+
+		/**
+		 * Minimum time to wait before getting page state for LLM input
+		 * @default 0.5
+		 */
+		minimumWaitPageLoadTime?: number;
+
+		/**
+		 * Time to wait for network requests to finish before getting page state
+		 * @default 1.0
+		 */
+		waitForNetworkIdlePageLoadTime?: number;
+
+		/**
+		 * Maximum time to wait for page load before proceeding anyway
+		 * @default 5.0
+		 */
+		maximumWaitPageLoadTime?: number;
+
+		/**
+		 * Time to wait between multiple per step actions
+		 * @default 1.0
+		 */
+		waitBetweenActions?: number;
+
+		/**
+		 * Browser window size
+		 * @default { width: 1280, height: 1100 }
+		 */
+		browserWindowSize?: {
 			width: number;
 			height: number;
 		};
-		userAgent?: string;
-		locale?: string;
-		timezoneId?: string;
-		geolocation?: {
-			latitude: number;
-			longitude: number;
-			accuracy?: number;
-		};
-		permissions?: string[];
-		extraHTTPHeaders?: Record<string, string>;
-	};
 
-	/**
-	 * Wait times in milliseconds
-	 */
-	minimumWaitPageLoadTime: number;
-	waitForNetworkIdlePageLoadTime: number;
-	maximumWaitPageLoadTime: number;
+		/**
+		 * Disable viewport
+		 */
+		noViewport?: boolean;
+
+		/**
+		 * Path to save video recordings
+		 */
+		saveRecordingPath?: string;
+
+		/**
+		 * Path to save trace files
+		 * It will auto name the file with the TRACE_PATH/{context_id}.zip
+		 */
+		tracePath?: string;
+
+		/**
+		 * Whether to save screenshots
+		 * @default false
+		 */
+		saveScreenshots?: boolean;
+	};
 }
 
 /**
