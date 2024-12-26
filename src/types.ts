@@ -84,20 +84,6 @@ export interface BrowserResponse {
 }
 
 /**
- * History entry for agent actions
- */
-export interface AgentHistory {
-	/** Action performed */
-	action: string;
-	/** When the action was performed */
-	timestamp: Date;
-	/** Whether the action was successful */
-	success: boolean;
-	/** Additional details about the action */
-	details?: Record<string, unknown>;
-}
-
-/**
  * Main content extractor configuration
  */
 export interface ContentExtractorConfig {
@@ -114,4 +100,18 @@ export interface ContentExtractorConfig {
 		/** Whether to remove ads */
 		removeAds?: boolean;
 	};
+}
+
+export interface MessageContent {
+	type: 'text';
+	text: string;
+}
+
+export interface BaseMessage {
+	content: string | MessageContent[];
+	constructor: { name: string };
+}
+
+export interface BaseChatModel {
+	generateStructuredOutput<T>(messages: BaseMessage[], outputSchema: string): Promise<{ parsed: T }>;
 }

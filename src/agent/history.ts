@@ -3,11 +3,12 @@
  */
 
 import fs from "node:fs";
-import path from "node:path";
-import type { DOMHistoryElement } from "../dom/types";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+import type { DOMHistoryElement, DOMElementNode } from "../dom/types";
 import type { BrowserStateHistory } from "../browser/types";
 import type { ActionResult, AgentOutput } from "./types";
-import { convertDOMElementToHistoryElement, findHistoryElementInTree } from "../dom/tree-processor";
+import { convertDOMElementToHistoryElement } from "../dom/tree-processor";
 
 export class AgentHistory {
 	constructor(
@@ -44,7 +45,7 @@ export class AgentHistory {
 			if (actionName === "click" && typeof params === "object" && params !== null) {
 				const index = (params as Record<string, unknown>).index;
 				if (typeof index === "number") {
-					const element = selector_map[index];
+					const element = selector_map[index] as DOMElementNode;
 					elements.push(convertDOMElementToHistoryElement(element));
 				}
 			}
@@ -95,7 +96,7 @@ export class AgentHistoryList {
 	}
 
 	urls(): string[] {
-		return [...new Set(this.history.map(h => h.state.url))];
+		return [...new Set(this.history.map(h => h.state.url).filter((url): url is string => url !== undefined))];
 	}
 
 	screenshots(): string[] {
@@ -106,7 +107,7 @@ export class AgentHistoryList {
 
 	async saveToFile(filepath: string): Promise<void> {
 		await mkdir(dirname(filepath), { recursive: true });
-		await writeFile(filepath, JSON.stringify(this.toDict(), null, 2));
+		await fs.promises.writeFile(filepath, JSON.stringify(this.toDict(), null, 2));
 	}
 
 	async loadFromFile(filepath: string): Promise<void> {

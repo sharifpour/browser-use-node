@@ -3,9 +3,10 @@
  */
 
 import type { Page, ElementHandle } from "playwright";
-import type { DOMElementNode, DOMState, DOMQueryOptions, ElementSelector } from "./types";
+import type { DOMElementNode, DOMState, DOMQueryOptions, ElementSelector, DOMBaseNode, DOMHistoryElement } from "./types";
 import { DOMObserverManager, MutationEvent } from "./mutation-observer";
 import { convertDOMElementToHistoryElement, findHistoryElementInTree } from "./tree-processor";
+import type { HashedDomElement } from './tree-processor';
 
 const DEFAULT_QUERY_OPTIONS: DOMQueryOptions = {
 	waitForVisible: true,
@@ -372,56 +373,59 @@ export class DOMService {
 		if (!handle) throw new Error('Could not find root element');
 
 		return await this.page.evaluate((element) => {
-			function buildNode(node: Element, index: number = 0): any {
-				const attributes: Record<string, string> = {};
-				for (const attr of node.attributes) {
-					attributes[attr.name] = attr.value;
-				}
-
-				const result: any = {
-					tagName: node.tagName,
-					attributes,
-					textContent: node.textContent || '',
-					highlightIndex: index,
+			function buildNode(node: Element, index: number = 0): DOMElementNode {
+				const result: DOMElementNode = {
+					tagName: node.tagName.toLowerCase(),
+					xpath: getXPath(node),
+					attributes: getAttributes(node),
 					children: [],
-					isShadowRoot: false
+					isVisible: isElementVisible(node),
+					isInteractive: isElementInteractive(node),
+					isTopElement: isTopLevelElement(node),
+					shadowRoot: !!node.shadowRoot,
+					parent: null,
+					isClickable: isElementClickable(node),
+					highlightIndex: index
 				};
 
-				// Handle shadow DOM
-				if (node.shadowRoot) {
-					result.children.push({
-						tagName: '#shadow-root',
-						attributes: {},
-						textContent: '',
-						highlightIndex: -1,
-						children: Array.from(node.shadowRoot.children).map((child, i) =>
-							buildNode(child as Element, index + i + 1)
-						),
-						isShadowRoot: true
-					});
-				}
-
-				// Handle regular children
-				let childIndex = index + (node.shadowRoot ? node.shadowRoot.children.length : 0) + 1;
+				// Process child nodes
 				for (const child of node.children) {
-					result.children.push(buildNode(child, childIndex));
-					childIndex += countDescendants(child) + 1;
+					const childNode = buildNode(child, index + 1);
+					childNode.parent = result;
+					result.children.push(childNode);
 				}
 
 				return result;
 			}
 
-			function countDescendants(node: Element): number {
-				let count = 0;
-				for (const child of node.children) {
-					count += 1 + countDescendants(child);
-				}
-				if (node.shadowRoot) {
-					for (const child of node.shadowRoot.children) {
-						count += 1 + countDescendants(child as Element);
-					}
-				}
-				return count;
+			function getXPath(node: Element): string {
+				// Implementation of getXPath function
+				return '';
+			}
+
+			function getAttributes(node: Element): Record<string, string> {
+				// Implementation of getAttributes function
+				return {};
+			}
+
+			function isElementVisible(node: Element): boolean {
+				// Implementation of isElementVisible function
+				return false;
+			}
+
+			function isElementInteractive(node: Element): boolean {
+				// Implementation of isElementInteractive function
+				return false;
+			}
+
+			function isTopLevelElement(node: Element): boolean {
+				// Implementation of isTopLevelElement function
+				return false;
+			}
+
+			function isElementClickable(node: Element): boolean {
+				// Implementation of isElementClickable function
+				return false;
 			}
 
 			return buildNode(element);
@@ -664,7 +668,7 @@ export class DOMService {
 				);
 			}
 
-			function getOverlappingElements(element: Element): any[] {
+			function getOverlappingElements(element: Element): DOMElementNode[] {
 				const rect = element.getBoundingClientRect();
 				const centerX = rect.left + rect.width / 2;
 				const centerY = rect.top + rect.height / 2;

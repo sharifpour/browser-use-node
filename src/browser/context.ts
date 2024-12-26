@@ -2,17 +2,18 @@
  * Browser context with enhanced capabilities.
  */
 
-import type { Page, BrowserContext as PlaywrightContext, ElementHandle, FrameLocator, Cookie, Request, Route, Response, ConsoleMessage, Dialog, FileChooser, WebSocket, Worker } from "playwright";
-import type { Browser } from "./browser";
-import type { BrowserState, BrowserStateHistory, TabInfo } from "./types";
-import type { DOMElementNode } from "../dom/types";
-import type { BrowserContextConfig } from "./config";
-import { DOMService } from "../dom/service";
-import { writeFile } from "node:fs/promises";
+import * as fs from 'node:fs/promises';
 import { mkdir } from "node:fs/promises";
+import * as path from 'node:path';
 import { dirname } from "node:path";
+import type { Browser as PlaywrightBrowser, ConsoleMessage, Cookie, Dialog, ElementHandle, FileChooser, Frame, Page, BrowserContext as PlaywrightContext, Request, Response, Route, WebSocket, Worker } from "playwright";
 import { v4 as uuidv4 } from 'uuid';
-import { SecurityService } from '../services/security';
+import { DOMService } from "../dom/service";
+import type { DOMElementNode } from "../dom/types";
+import { logger } from '../utils/logger';
+import type { Browser } from "./browser";
+import type { BrowserContextConfig } from "./config";
+import type { BrowserSession, BrowserState, BrowserStateHistory, TabInfo as BrowserTabInfo } from "./types";
 
 const DEFAULT_CONFIG: BrowserContextConfig = {
 	minimumWaitPageLoadTime: 0.5,
@@ -60,9 +61,9 @@ export type PageEventHandler = {
 	dialog: (dialog: Dialog) => Promise<void> | void;
 	download: (download: { url: string; suggestedFilename: string }) => Promise<void> | void;
 	filechooser: (fileChooser: FileChooser) => Promise<void> | void;
-	frameattached: (frame: any) => Promise<void> | void;
-	framedetached: (frame: any) => Promise<void> | void;
-	framenavigated: (frame: any) => Promise<void> | void;
+	frameattached: (frame: Frame) => Promise<void> | void;
+	framedetached: (frame: Frame) => Promise<void> | void;
+	framenavigated: (frame: Frame) => Promise<void> | void;
 	load: () => Promise<void> | void;
 	pageerror: (error: Error) => Promise<void> | void;
 	popup: (page: Page) => Promise<void> | void;
@@ -77,7 +78,7 @@ export type PageEventHandler = {
 /**
  * Information about a browser tab
  */
-interface TabInfo {
+interface TabInfo extends BrowserTabInfo {
 	pageId: number;
 	url: string;
 	title: string;
@@ -86,9 +87,15 @@ interface TabInfo {
 /**
  * Browser session information
  */
-interface BrowserSession {
-	context: BrowserContext;
-	currentPage: Page;
+interface SessionState {
+	cachedState: {
+		selectorMap: Record<number, DOMElementNode>;
+	};
+}
+
+interface SecurityService {
+	getBrowserContextConfig: () => { bypassCSP: boolean; ignoreHTTPSErrors: boolean };
+	getCookieOptions: () => { secure: boolean; httpOnly: boolean; sameSite: 'Strict' | 'Lax' | 'None' };
 }
 
 /**
@@ -101,7 +108,7 @@ export class BrowserContext {
 	private context: PlaywrightContext | null = null;
 	private currentPage: Page | null = null;
 	private domService: DOMService | null = null;
-	private session: BrowserSession = {
+	private session: SessionState = {
 		cachedState: {
 			selectorMap: {}
 		}
@@ -110,6 +117,7 @@ export class BrowserContext {
 	private responseInterceptors: ResponseInterceptor[] = [];
 	private eventHandlers: Partial<Record<PageEventType, PageEventHandler[keyof PageEventHandler][]>> = {};
 	private securityService: SecurityService;
+	private currentState: BrowserState | null = null;
 
 	constructor(browser: Browser, config: Partial<BrowserContextConfig> = {}) {
 		this.contextId = uuidv4();
@@ -120,7 +128,17 @@ export class BrowserContext {
 		this.browser = browser;
 
 		// Initialize security service
-		this.securityService = SecurityService.getInstance();
+		this.securityService = {
+			getBrowserContextConfig: () => ({
+				bypassCSP: false,
+				ignoreHTTPSErrors: false
+			}),
+			getCookieOptions: () => ({
+				secure: true,
+				httpOnly: true,
+				sameSite: 'Strict' as const
+			})
+		};
 	}
 
 	/**
@@ -155,30 +173,32 @@ export class BrowserContext {
 		// Load cookies if file exists
 		if (this.config.cookiesFile) {
 			try {
-				const fs = await import("node:fs/promises");
-				const cookies = JSON.parse(
-					await fs.readFile(this.config.cookiesFile, "utf-8")
-				);
+				const cookieData = await fs.readFile(this.config.cookiesFile, "utf-8");
+				const cookies = JSON.parse(cookieData);
 				await this.context.addCookies(cookies);
 			} catch (error) {
-				console.warn("Failed to load cookies:", error);
+				logger.warn("Failed to load cookies:", error);
 			}
 		}
 
 		// Start tracing if path provided
-		if (this.config.tracePath) {
-			await this.context.tracing.start({
-				screenshots: true,
-				snapshots: true,
-				sources: true
-			});
-		}
+		if (this.config.tracePath && this.context) {
+				await this.context.tracing.start({
+					screenshots: true,
+					snapshots: true,
+					sources: true
+				});
+			}
 	}
 
-	private async createContext(browser: PlaywrightBrowser): Promise<PlaywrightBrowserContext> {
-		if (this.browser.config.chromeInstancePath && browser.contexts.length > 0) {
+	/**
+	 * Create a browser context
+	 */
+	private async createContext(browser: PlaywrightBrowser): Promise<PlaywrightContext> {
+		const browserConfig = await this.browser.getConfig();
+		if (browserConfig.chromeInstancePath && browser.contexts().length > 0) {
 			// Connect to existing Chrome instance instead of creating new one
-			return browser.contexts[0];
+			return browser.contexts()[0];
 		}
 
 		// Get security configuration
@@ -187,7 +207,6 @@ export class BrowserContext {
 		// Create new context with security settings
 		const context = await browser.newContext({
 			viewport: this.config.browserWindowSize,
-			noViewport: false,
 			userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36',
 			javaScriptEnabled: true,
 			bypassCSP: securityConfig.bypassCSP,
@@ -200,20 +219,25 @@ export class BrowserContext {
 		}
 
 		// Load cookies if they exist
-		if (this.config.cookiesFile && fs.existsSync(this.config.cookiesFile)) {
-			const cookies = JSON.parse(fs.readFileSync(this.config.cookiesFile, 'utf-8'));
-			logger.info(`Loaded ${cookies.length} cookies from ${this.config.cookiesFile}`);
+		if (this.config.cookiesFile) {
+			try {
+				const cookieData = await fs.readFile(this.config.cookiesFile, 'utf-8');
+				const cookies = JSON.parse(cookieData) as Cookie[];
+				logger.info(`Loaded ${cookies.length} cookies from ${this.config.cookiesFile}`);
 
-			// Apply cookie security options
-			const cookieOptions = this.securityService.getCookieOptions();
-			const securedCookies = cookies.map((cookie: any) => ({
-				...cookie,
-				secure: cookieOptions.secure,
-				httpOnly: cookieOptions.httpOnly,
-				sameSite: cookieOptions.sameSite
-			}));
+				// Apply cookie security options
+				const cookieOptions = this.securityService.getCookieOptions();
+				const securedCookies = cookies.map(cookie => ({
+					...cookie,
+					secure: cookieOptions.secure,
+					httpOnly: cookieOptions.httpOnly,
+					sameSite: cookieOptions.sameSite
+				}));
 
-			await context.addCookies(securedCookies);
+				await context.addCookies(securedCookies);
+			} catch (error) {
+				logger.warn(`Failed to load cookies: ${error}`);
+			}
 		}
 
 		// Add anti-detection scripts
@@ -249,170 +273,12 @@ export class BrowserContext {
 	}
 
 	/**
-	 * Click on an element node with enhanced reliability
-	 */
-	public async clickElementNode(elementNode: DOMElementNode): Promise<void> {
-		const page = await this.getPage();
-
-		try {
-			const element = await this.getLocateElement(elementNode);
-			if (!element) {
-				throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
-			}
-
-			// Ensure element is in view
-			await element.scrollIntoViewIfNeeded()
-				.catch(() => console.warn('Could not scroll element into view'));
-
-			try {
-				// Try native click first
-				await element.click({ timeout: 1500 });
-				await this.waitForPageLoad();
-			} catch (error) {
-				try {
-					// Fallback to JavaScript click
-					await page.evaluate((el) => {
-						el.click();
-					}, element);
-					await this.waitForPageLoad();
-				} catch (jsError) {
-					throw new Error(`Failed to click element: ${jsError instanceof Error ? jsError.message : 'Unknown error'}`);
-				}
-			}
-		} catch (error) {
-			throw new Error(`Failed to click element: ${JSON.stringify(elementNode)}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-		}
-	}
-
-	/**
-	 * Input text into an element node with enhanced reliability
-	 */
-	public async inputTextElementNode(elementNode: DOMElementNode, text: string): Promise<void> {
-		try {
-			const page = await this.getPage();
-			const element = await this.getLocateElement(elementNode);
-
-			if (!element) {
-				throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
-			}
-
-			// Ensure element is in view
-			await element.scrollIntoViewIfNeeded({ timeout: 2500 })
-				.catch(() => console.warn('Could not scroll element into view'));
-
-			// Clear existing text first
-			await element.fill('');
-
-			// Type text character by character
-			await element.type(text);
-
-			// Wait for any potential dynamic updates
-			await this.waitForPageLoad();
-		} catch (error) {
-			throw new Error(`Failed to input text into element: ${JSON.stringify(elementNode)}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
-		}
-	}
-
-	/**
-	 * Remove highlights from the page
-	 */
-	public async removeHighlights(): Promise<void> {
-		const page = await this.getPage();
-		await page.evaluate(() => {
-			const highlights = document.querySelectorAll('.highlight-element');
-			for (const el of Array.from(highlights)) {
-				el.remove();
-			}
-		});
-	}
-
-	/**
-	 * Get the active page
-	 */
-	async getPage(): Promise<Page> {
-		if (!this.context) {
-			await this.init();
-		}
-
-		if (!this.currentPage) {
-			this.currentPage = await this.context.newPage();
-		}
-
-		return this.currentPage;
-	}
-
-	/**
-	 * Close the browser context
-	 */
-	async close(): Promise<void> {
-		console.debug('Closing browser context');
-
-		try {
-			// Check if already closed
-			if (!this.context) {
-				return;
-			}
-
-			// Save cookies if file specified
-			if (this.config.cookiesFile) {
-				await this.saveCookies();
-			}
-
-			// Stop tracing if enabled
-			if (this.config.tracePath) {
-				try {
-					await this.context.tracing.stop({
-						path: path.join(this.config.tracePath, `${this.contextId}.zip`)
-					});
-				} catch (error) {
-					console.debug(`Failed to stop tracing: ${error}`);
-				}
-			}
-
-			// Clear all event listeners
-			await this.clearAllEventListeners();
-
-			// Remove DOM highlights
-			await this.removeHighlights();
-
-			// Close all pages
-			for (const [_, page] of this.pages) {
-				try {
-					await page.close();
-				} catch (error) {
-					console.debug(`Failed to close page: ${error}`);
-				}
-			}
-
-			// Close context
-			try {
-				await this.context.close();
-			} catch (error) {
-				console.debug(`Failed to close context: ${error}`);
-			}
-		} finally {
-			// Clear references
-			this.context = null;
-			this.currentPage = null;
-			this.domService = null;
-			this.session = {
-				cachedState: {
-					selectorMap: {}
-				}
-			};
-			this.requestInterceptors = [];
-			this.responseInterceptors = [];
-			this.eventHandlers = {};
-		}
-	}
-
-	/**
 	 * Save current cookies to file
 	 */
 	private async saveCookies(): Promise<void> {
-		if (this.session?.context && this.config.cookiesFile) {
+		if (this.context && this.config.cookiesFile) {
 			try {
-				const cookies = await this.session.context.cookies();
+				const cookies = await this.context.cookies();
 				logger.info(`Saving ${cookies.length} cookies to ${this.config.cookiesFile}`);
 
 				// Apply cookie security options
@@ -425,14 +291,18 @@ export class BrowserContext {
 				}));
 
 				// Create directory if it doesn't exist
-				const dirname = path.dirname(this.config.cookiesFile);
-				if (dirname) {
-					fs.mkdirSync(dirname, { recursive: true });
+				const cookieDir = path.dirname(this.config.cookiesFile);
+				if (cookieDir) {
+					await mkdir(cookieDir, { recursive: true });
 				}
 
-				fs.writeFileSync(this.config.cookiesFile, JSON.stringify(securedCookies));
+				await fs.writeFile(
+					this.config.cookiesFile,
+					JSON.stringify(securedCookies, null, 2),
+					'utf-8'
+				);
 			} catch (error) {
-				logger.warning(`Failed to save cookies: ${error}`);
+				logger.warn(`Failed to save cookies: ${error}`);
 			}
 		}
 	}
@@ -444,9 +314,16 @@ export class BrowserContext {
 		if (!this.context) {
 			await this.init();
 		}
+		const state = this.currentState || {
+			url: this.currentPage?.url(),
+			title: await this.currentPage?.title(),
+			selectorMap: this.session.cachedState.selectorMap
+		};
 		return {
-			context: this.context!,
-			currentPage: this.currentPage!
+			context: this.context as PlaywrightContext,
+			state,
+			tabs: await this.getTabs(),
+			cachedState: this.session.cachedState
 		};
 	}
 
@@ -454,15 +331,15 @@ export class BrowserContext {
 	 * Get the current state of the browser
 	 * @param useVision Whether to include a screenshot in the state
 	 */
-	public async getState(useVision: boolean = false): Promise<BrowserState> {
+	public async getState(useVision = false): Promise<BrowserState> {
 		await this.waitForPageLoad();
-		const session = await this.getSession();
+		await this.getSession(); // Ensure session is initialized
 		const state = await this.updateState(useVision);
 
 		// Save cookies if a file is specified
 		if (this.config.cookiesFile) {
-			this.saveCookies().catch(error =>
-				console.warn('Failed to save cookies:', error)
+			await this.saveCookies().catch(error =>
+				logger.warn('Failed to save cookies:', error)
 			);
 		}
 
@@ -473,23 +350,22 @@ export class BrowserContext {
 	 * Update and return state
 	 * @param useVision Whether to include a screenshot in the state
 	 */
-	private async updateState(useVision: boolean = false): Promise<BrowserState> {
-		const session = await this.getSession();
+	private async updateState(useVision = false): Promise<BrowserState> {
+		const page = await this.getPage();
 
 		// Check if current page is still valid, if not switch to another available page
 		try {
-			const page = await this.getPage();
-			// Test if page is still accessible
 			await page.evaluate('1');
 		} catch (error) {
-			console.debug('Current page is no longer accessible:', error);
-			// Get all available pages
-			const pages = session.context.pages();
-			if (pages.length > 0) {
-				this.currentPage = pages[pages.length - 1];
-				console.debug(`Switched to page: ${await this.currentPage.title()}`);
-			} else {
-				throw new Error('No valid pages available');
+			logger.debug('Current page is no longer accessible:', error);
+			if (this.context) {
+				const pages = this.context.pages();
+				if (pages.length > 0) {
+					this.currentPage = pages[pages.length - 1];
+					logger.debug(`Switched to page: ${await this.currentPage.title()}`);
+				} else {
+					throw new Error('No valid pages available');
+				}
 			}
 		}
 
@@ -501,22 +377,24 @@ export class BrowserContext {
 
 			let screenshotBase64: string | undefined;
 			if (useVision) {
-				screenshotBase64 = await this.takeScreenshot();
+				const buffer = await page.screenshot({ type: 'png' });
+				screenshotBase64 = buffer.toString('base64');
 			}
 
 			const state: BrowserState = {
-				elementTree: content.elementTree,
-				selectorMap: content.selectorMap,
 				url: page.url(),
 				title: await page.title(),
-				tabs: await this.getTabsInfo(),
+				tabs: await this.getTabs(),
+				domTree: content[0], // Use first element as root
+				clickableElements: content,
+				selectorMap: this.session.cachedState.selectorMap,
 				screenshot: screenshotBase64
 			};
 
+			this.currentState = state;
 			return state;
 		} catch (error) {
-			console.error('Failed to update state:', error);
-			// Return last known good state if available
+			logger.error('Failed to update state:', error);
 			if (this.currentState) {
 				return this.currentState;
 			}
@@ -525,73 +403,36 @@ export class BrowserContext {
 	}
 
 	/**
-	 * Take a screenshot of the current page
-	 * @param fullPage Whether to take a full page screenshot
+	 * Wait for page load with network idle detection
+	 * @param timeoutOverwrite Optional timeout override in milliseconds
 	 */
-	private async takeScreenshot(fullPage: boolean = false): Promise<string> {
+	private async waitForPageLoad(timeoutOverwrite?: number): Promise<void> {
+		const startTime = Date.now();
 		const page = await this.getPage();
 
-		const screenshot = await page.screenshot({
-			fullPage,
-			animations: 'disabled'
-		});
-
-		return screenshot.toString('base64');
-	}
-
-	/**
-	 * Save cookies to file
-	 */
-	private async saveCookies(): Promise<void> {
-		const session = await this.getSession();
-		if (session && session.context && this.config.cookiesFile) {
-			try {
-				const cookies = await session.context.cookies();
-				console.info(`Saving ${cookies.length} cookies to ${this.config.cookiesFile}`);
-
-				// Check if the path is a directory and create it if necessary
-				const dirname = path.dirname(this.config.cookiesFile);
-				if (dirname) {
-					await fs.mkdir(dirname, { recursive: true });
-				}
-
-				await fs.writeFile(
-					this.config.cookiesFile,
-					JSON.stringify(cookies),
-					'utf-8'
-				);
-			} catch (error) {
-				console.warn('Failed to save cookies:', error);
-			}
-		}
-	}
-
-	/**
-	 * Remove highlight overlays from the page
-	 */
-	private async removeHighlights(): Promise<void> {
 		try {
-			const page = await this.getPage();
-			await page.evaluate(`
-				try {
-					// Remove the highlight container and all its contents
-					const container = document.getElementById('playwright-highlight-container');
-					if (container) {
-						container.remove();
-					}
+			// Wait for network to be idle
+			await page.waitForLoadState('networkidle', {
+				timeout: (this.config.maximumWaitPageLoadTime || 5.0) * 1000
+			});
 
-					// Remove highlight attributes from elements
-					const highlightedElements = document.querySelectorAll('[browser-user-highlight-id^="playwright-highlight-"]');
-					highlightedElements.forEach(el => {
-						el.removeAttribute('browser-user-highlight-id');
-					});
-				} catch (e) {
-					console.error('Failed to remove highlights:', e);
-				}
-			`);
+			// Calculate remaining time to meet minimum wait time
+			const elapsed = (Date.now() - startTime) / 1000;
+			const remaining = Math.max(
+				((timeoutOverwrite ?? (this.config.minimumWaitPageLoadTime || 0.5)) - elapsed) * 1000,
+				0
+			);
+
+			console.debug(
+				`--Page loaded in ${elapsed.toFixed(2)} seconds, waiting for additional ${(remaining / 1000).toFixed(2)} seconds`
+			);
+
+			// Sleep remaining time if needed
+			if (remaining > 0) {
+				await new Promise(resolve => setTimeout(resolve, remaining));
+			}
 		} catch (error) {
-			console.debug('Failed to remove highlights (this is usually ok):', error);
-			// Don't raise the error since this is not critical functionality
+			console.warn('Page load failed, continuing...', error);
 		}
 	}
 
@@ -653,40 +494,6 @@ export class BrowserContext {
 
 		const buffer = await this.currentPage.screenshot({ type: 'png' });
 		return buffer.toString('base64');
-	}
-
-	/**
-	 * Wait for page load with network idle detection
-	 * @param timeoutOverwrite Optional timeout override in milliseconds
-	 */
-	private async waitForPageLoad(timeoutOverwrite?: number): Promise<void> {
-		const startTime = Date.now();
-		const page = await this.getPage();
-
-		try {
-			// Wait for network to be idle
-			await page.waitForLoadState('networkidle', {
-				timeout: this.config.maximumWaitPageLoadTime * 1000
-			});
-
-			// Calculate remaining time to meet minimum wait time
-			const elapsed = (Date.now() - startTime) / 1000;
-			const remaining = Math.max(
-				((timeoutOverwrite ?? this.config.minimumWaitPageLoadTime) - elapsed) * 1000,
-				0
-			);
-
-			console.debug(
-				`--Page loaded in ${elapsed.toFixed(2)} seconds, waiting for additional ${(remaining/1000).toFixed(2)} seconds`
-			);
-
-			// Sleep remaining time if needed
-			if (remaining > 0) {
-				await new Promise(resolve => setTimeout(resolve, remaining));
-			}
-		} catch (error) {
-			console.warn('Page load failed, continuing...', error);
-		}
 	}
 
 	/**
@@ -761,8 +568,8 @@ export class BrowserContext {
 	 */
 	public async isFileUploader(
 		elementNode: DOMElementNode,
-		maxDepth: number = 3,
-		currentDepth: number = 0
+		maxDepth = 3,
+		currentDepth = 0
 	): Promise<boolean> {
 		if (currentDepth > maxDepth) {
 			return false;
@@ -771,7 +578,7 @@ export class BrowserContext {
 		// Check current element
 		let isUploader = false;
 
-		if (elementNode.tag_name === 'input') {
+		if (elementNode.tagName === 'input') {
 			isUploader = (
 				elementNode.attributes.type === 'file' ||
 				elementNode.attributes.accept !== undefined
@@ -785,8 +592,8 @@ export class BrowserContext {
 		// Recursively check children
 		if (elementNode.children && currentDepth < maxDepth) {
 			for (const child of elementNode.children) {
-				if (child instanceof DOMElementNode) {
-					if (await this.isFileUploader(child, maxDepth, currentDepth + 1)) {
+				if ('tagName' in child) {
+					if (await this.isFileUploader(child as DOMElementNode, maxDepth, currentDepth + 1)) {
 						return true;
 					}
 				}
@@ -933,12 +740,12 @@ export class BrowserContext {
 	/**
 	 * Get element by index with retry logic for stale elements
 	 */
-	public async getElementByIndex(index: number): Promise<ElementHandle | null> {
+	public async getElementByIndex(index: number): Promise<ElementHandle<Element> | null> {
 		if (typeof index !== 'number' || index < 0) {
 			throw new Error(`Invalid element index: ${index}`);
 		}
 
-		const selectorMap = (await this.getSession()).cachedState.selectorMap;
+		const selectorMap = this.session.cachedState.selectorMap;
 		if (!selectorMap[index]) {
 			throw new Error(`No element found at index: ${index}`);
 		}
@@ -946,26 +753,26 @@ export class BrowserContext {
 		// Add retry logic for stale elements
 		const maxRetries = 3;
 		let retryCount = 0;
-		let lastError: Error | null = null;
+		let lastError: Error | undefined;
 
 		while (retryCount < maxRetries) {
 			try {
 				const element = await this.getLocateElement(selectorMap[index]);
 				if (element) {
 					// Verify element is still attached to DOM
-					await element.evaluate(node => node.isConnected)
+					await element.evaluate((node: Element) => node.isConnected)
 						.catch(() => { throw new Error('Element is detached from DOM'); });
 					return element;
 				}
 				return null;
 			} catch (error) {
-				lastError = error as Error;
+				lastError = error instanceof Error ? error : new Error('Unknown error');
 				retryCount++;
 				if (retryCount < maxRetries) {
 					await new Promise(resolve => setTimeout(resolve, 100));
 					// Refresh selector map if needed
 					const session = await this.getSession();
-					if (session.cachedState.selectorMap[index]) {
+					if (session.state.url === await this.currentPage?.url()) {
 						selectorMap[index] = session.cachedState.selectorMap[index];
 					}
 				}
@@ -991,8 +798,9 @@ export class BrowserContext {
 		}
 
 		try {
+			const page = await this.getPage();
 			// Validate element still exists in DOM
-			const exists = await this.page.evaluate((xpath) => {
+			const exists = await page.evaluate((xpath: string) => {
 				const result = document.evaluate(
 					xpath,
 					document,
@@ -1005,13 +813,13 @@ export class BrowserContext {
 
 			if (!exists) {
 				// Remove from selector map if element no longer exists
-				delete session.cachedState.selectorMap[index];
+				delete this.session.cachedState.selectorMap[index];
 				return null;
 			}
 
 			return element;
 		} catch (error) {
-			console.warn(`Error validating element at index ${index}:`, error);
+			logger.warn(`Error validating element at index ${index}:`, error);
 			return null;
 		}
 	}
@@ -1020,21 +828,26 @@ export class BrowserContext {
 	 * Convert simple XPath to CSS selector when possible
 	 */
 	private _convertSimpleXPathToCssSelector(xpath: string): string | null {
-		// Handle simple XPath patterns
-		const idMatch = xpath.match(/\/\/*[@id='([^']*)']$/);
-		if (idMatch) return `#${CSS.escape(idMatch[1])}`;
+		try {
+			// Handle simple XPath patterns
+			const idMatch = xpath.match(/\/\/*\[@id='([^']*)']/);
+			if (idMatch?.[1]) return `#${CSS.escape(idMatch[1])}`;
 
-		const classMatch = xpath.match(/\/\/*[@class='([^']*)']$/);
-		if (classMatch) return `.${classMatch[1].split(/\s+/).map(c => CSS.escape(c)).join('.')}`;
+			const classMatch = xpath.match(/\/\/*\[@class='([^']*)']/);
+			if (classMatch?.[1]) return `.${classMatch[1].split(/\s+/).map(c => CSS.escape(c)).join('.')}`;
 
-		const tagMatch = xpath.match(/\/\/(\w+)$/);
-		if (tagMatch) return tagMatch[1].toLowerCase();
+			const tagMatch = xpath.match(/\/\/(\w+)$/);
+			if (tagMatch?.[1]) return tagMatch[1].toLowerCase();
 
-		const attrMatch = xpath.match(/\/\/*\[@([^=]+)='([^']*)']$/);
-		if (attrMatch) return `[${CSS.escape(attrMatch[1])}="${CSS.escape(attrMatch[2])}"]`;
+			const attrMatch = xpath.match(/\/\/*\[@([^=]+)='([^']*)']/);
+			if (attrMatch?.[1] && attrMatch?.[2]) return `[${CSS.escape(attrMatch[1])}="${CSS.escape(attrMatch[2])}"]`;
 
-		// Return null for complex XPath that can't be converted
-		return null;
+			// Return null for complex XPath that can't be converted
+			return null;
+		} catch (error) {
+			logger.warn('Error converting XPath to CSS:', error);
+			return null;
+		}
 	}
 
 	/**
@@ -1115,7 +928,7 @@ export class BrowserContext {
 	 */
 	public async getLocateElement(element: DOMElementNode): Promise<ElementHandle | null> {
 		const page = await this.getPage();
-		let currentFrame: Page | FrameLocator = page;
+		const currentFrame: Page | FrameLocator = page;
 
 		try {
 			// Try XPath first if available
@@ -1704,7 +1517,7 @@ export class BrowserContext {
 				this.eventHandlers[eventType] = [];
 
 				// Create wrapper function to handle timeouts and errors
-				const wrapperFn = async (...args: any[]) => {
+				const wrapperFn = async (...args: Parameters<PageEventHandler[T]>) => {
 					const handlers = this.eventHandlers[eventType] || [];
 					for (const handler of handlers) {
 						try {
@@ -1712,27 +1525,27 @@ export class BrowserContext {
 								setTimeout(() => reject(new Error(`Event handler timeout after ${timeout}ms`)), timeout);
 							});
 
-							const handlerPromise = Promise.resolve(handler(...args));
+							const handlerPromise = Promise.resolve((handler as PageEventHandler[T])(...args));
 							await Promise.race([handlerPromise, timeoutPromise]);
 
 							if (once) {
-								this.removeEventListener(eventType, handler);
+								this.removeEventListener(eventType, handler as PageEventHandler[T]);
 							}
 						} catch (error) {
-							console.error(`Error in ${eventType} event handler:`, error);
-							// Remove failed handler if it's a one-time handler
+							logger.error(`Error in ${eventType} event handler:`, error);
 							if (once) {
-								this.removeEventListener(eventType, handler);
+								this.removeEventListener(eventType, handler as PageEventHandler[T]);
 							}
 						}
 					}
 				};
 
 				// Store wrapper function for cleanup
-				(page as any).__eventWrappers = (page as any).__eventWrappers || {};
-				(page as any).__eventWrappers[eventType] = wrapperFn;
+				const pageWithWrappers = page as Page & { __eventWrappers?: Record<string, Function> };
+				pageWithWrappers.__eventWrappers = pageWithWrappers.__eventWrappers || {};
+				pageWithWrappers.__eventWrappers[eventType] = wrapperFn;
 
-				page.on(eventType as any, wrapperFn);
+				page.on(eventType, wrapperFn);
 			}
 
 			this.eventHandlers[eventType]?.push(handler);
@@ -1770,11 +1583,12 @@ export class BrowserContext {
 	public async removeAllEventListeners(eventType: PageEventType): Promise<void> {
 		try {
 			const page = await this.getPage();
-			const wrapper = (page as any).__eventWrappers?.[eventType];
+			const pageWithWrappers = page as Page & { __eventWrappers?: Record<string, Function> };
+			const wrapper = pageWithWrappers.__eventWrappers?.[eventType];
 
 			if (wrapper) {
-				page.removeListener(eventType as any, wrapper);
-				delete (page as any).__eventWrappers[eventType];
+				page.removeListener(eventType, wrapper);
+				delete pageWithWrappers.__eventWrappers?.[eventType];
 			}
 
 			this.eventHandlers[eventType] = [];
@@ -1789,17 +1603,20 @@ export class BrowserContext {
 	public async clearAllEventListeners(): Promise<void> {
 		try {
 			const page = await this.getPage();
+			const pageWithWrappers = page as Page & { __eventWrappers?: Record<string, Function> };
 
 			// Remove all event listeners from page
 			for (const eventType of Object.keys(this.eventHandlers) as PageEventType[]) {
-				const wrapper = (page as any).__eventWrappers?.[eventType];
+				const wrapper = pageWithWrappers.__eventWrappers?.[eventType];
 				if (wrapper) {
-					page.removeListener(eventType as any, wrapper);
+					page.removeListener(eventType, wrapper);
 				}
 			}
 
 			// Clear stored wrappers
-			(page as any).__eventWrappers = {};
+			if (pageWithWrappers.__eventWrappers) {
+				pageWithWrappers.__eventWrappers = {};
+			}
 
 			// Clear handler arrays
 			this.eventHandlers = {};
@@ -1903,101 +1720,10 @@ export class BrowserContext {
 	 */
 	public async waitForStableNetwork(): Promise<void> {
 		const page = await this.getPage();
-
 		const pendingRequests = new Set<Request>();
 		let lastActivity = Date.now();
 
-		// Define relevant resource types and content types
-		const RELEVANT_RESOURCE_TYPES = new Set([
-			'document',
-			'stylesheet',
-			'image',
-			'font',
-			'script',
-			'iframe'
-		]);
-
-		const RELEVANT_CONTENT_TYPES = new Set([
-			'text/html',
-			'text/css',
-			'application/javascript',
-			'image/',
-			'font/',
-			'application/json'
-		]);
-
-		// Additional patterns to filter out
-		const IGNORED_URL_PATTERNS = new Set([
-			// Analytics and tracking
-			'analytics',
-			'tracking',
-			'telemetry',
-			'beacon',
-			'metrics',
-			// Ad-related
-			'doubleclick',
-			'adsystem',
-			'adserver',
-			'advertising',
-			// Social media widgets
-			'facebook.com/plugins',
-			'platform.twitter',
-			'linkedin.com/embed',
-			// Live chat and support
-			'livechat',
-			'zendesk',
-			'intercom',
-			'crisp.chat',
-			'hotjar',
-			// Push notifications
-			'push-notifications',
-			'onesignal',
-			'pushwoosh',
-			// Background sync/heartbeat
-			'heartbeat',
-			'ping',
-			'alive',
-			// WebRTC and streaming
-			'webrtc',
-			'rtmp://',
-			'wss://',
-			// Common CDNs for dynamic content
-			'cloudfront.net',
-			'fastly.net'
-		]);
-
 		const onRequest = (request: Request) => {
-			// Filter by resource type
-			if (!RELEVANT_RESOURCE_TYPES.has(request.resourceType())) {
-				return;
-			}
-
-			// Filter out streaming, websocket, and other real-time requests
-			if (['websocket', 'media', 'eventsource', 'manifest', 'other'].includes(request.resourceType())) {
-				return;
-			}
-
-			// Filter out by URL patterns
-			const url = request.url().toLowerCase();
-			if ([...IGNORED_URL_PATTERNS].some(pattern => url.includes(pattern))) {
-				return;
-			}
-
-			// Filter out data URLs and blob URLs
-			if (url.startsWith('data:') || url.startsWith('blob:')) {
-				return;
-			}
-
-			// Filter out requests with certain headers
-			const headers = request.headers();
-			if (
-				headers['purpose'] === 'prefetch' ||
-				headers['sec-fetch-dest'] === 'video' ||
-				headers['sec-fetch-dest'] === 'audio'
-			) {
-				return;
-			}
-
 			pendingRequests.add(request);
 			lastActivity = Date.now();
 		};
@@ -2026,15 +1752,9 @@ export class BrowserContext {
 				return;
 			}
 
-			// Only process relevant content types
-			if (![...RELEVANT_CONTENT_TYPES].some(ct => contentType.includes(ct))) {
-				pendingRequests.delete(request);
-				return;
-			}
-
 			// Skip if response is too large (likely not essential for page load)
 			const contentLength = response.headers()['content-length'];
-			if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) { // 5MB
+			if (contentLength && Number.parseInt(contentLength) > 5 * 1024 * 1024) { // 5MB
 				pendingRequests.delete(request);
 				return;
 			}
@@ -2055,14 +1775,14 @@ export class BrowserContext {
 				const now = Date.now();
 				if (
 					pendingRequests.size === 0 &&
-					(now - lastActivity) >= this.config.waitForNetworkIdlePageLoadTime * 1000
+					(now - lastActivity) >= (this.config.waitForNetworkIdlePageLoadTime || 1.0) * 1000
 				) {
 					break;
 				}
-				if (now - startTime > this.config.maximumWaitPageLoadTime * 1000) {
-					console.debug(
+				if (now - startTime > (this.config.maximumWaitPageLoadTime || 5.0) * 1000) {
+					logger.debug(
 						`Network timeout after ${this.config.maximumWaitPageLoadTime}s with ${pendingRequests.size} ` +
-						`pending requests: ${[...pendingRequests].map(r => r.url())}`
+							`pending requests: ${[...pendingRequests].map(r => r.url())}`
 					);
 					break;
 				}
@@ -2073,8 +1793,40 @@ export class BrowserContext {
 			page.removeListener('response', onResponse);
 		}
 
-		console.debug(
+		logger.debug(
 			`Network stabilized for ${this.config.waitForNetworkIdlePageLoadTime} seconds`
 		);
+	}
+
+	/**
+	 * Remove highlights from the page
+	 */
+	private async removeHighlights(): Promise<void> {
+		const page = await this.getPage();
+		await page.evaluate(() => {
+			const highlights = document.querySelectorAll('.highlight-element');
+			highlights.forEach(el => el.classList.remove('highlight-element'));
+		});
+	}
+
+	/**
+	 * Get the current page, creating a new one if necessary
+	 */
+	private async getPage(): Promise<Page> {
+		if (!this.currentPage) {
+			if (!this.context) {
+				await this.init();
+			}
+			this.currentPage = await this.context!.newPage();
+
+			// Set default timeout
+			this.currentPage.setDefaultTimeout(this.config.maximumWaitPageLoadTime * 1000);
+
+			// Set viewport size
+			if (this.config.browserWindowSize) {
+				await this.currentPage.setViewportSize(this.config.browserWindowSize);
+			}
+		}
+		return this.currentPage;
 	}
 }

@@ -1,8 +1,7 @@
 export { Agent } from "./agent";
-export type { AgentRunConfig } from "./agent";
+export type { AgentConfig } from "./agent";
 export type {
   AgentStatus,
-  AgentConfig,
   AgentOutput,
   AgentState,
   AgentMessage,
@@ -13,3 +12,4 @@ export { AgentError } from "./types";
 export { SystemPrompt } from "./prompts";
 export { MessageManager } from "./message-manager";
 export { AgentHistory as AgentHistoryImpl, AgentHistoryList } from "./history";
+

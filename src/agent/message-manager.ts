@@ -2,7 +2,7 @@
  * Message manager for handling agent messages
  */
 
-import { AIMessage, SystemMessage, HumanMessage } from "langchain/schema";
+import { AIMessage, HumanMessage } from "langchain/schema";
 import type { BaseMessage } from "langchain/schema";
 import type { BrowserState } from "../browser/types";
 import type { ActionResult } from "../controller/types";
@@ -79,8 +79,9 @@ export class MessageManager {
 		stepInfo: AgentStepInfo | null = null
 	): void {
 		// If keep in memory, add to history and add state without result
-		if (result) {
-			for (const r of result) {
+		let currentResult = result;
+		if (currentResult) {
+			for (const r of currentResult) {
 				if (r.include_in_memory) {
 					if (r.extracted_content) {
 						const msg = new HumanMessage(r.extracted_content);
@@ -90,7 +91,8 @@ export class MessageManager {
 						const msg = new HumanMessage(r.error.slice(-this.maxErrorLength));
 						this.addMessageWithTokens(msg);
 					}
-					result = null; // if result in history, we don't want to add it again
+					currentResult = null; // if result in history, we don't want to add it again
+					break;
 				}
 			}
 		}
@@ -98,7 +100,7 @@ export class MessageManager {
 		// Create state message using AgentMessagePrompt
 		const stateMessage = new AgentMessagePrompt(
 			state,
-			result,
+			currentResult,
 			this.includeAttributes,
 			this.maxErrorLength,
 			stepInfo
@@ -162,8 +164,7 @@ export class MessageManager {
 		const proportionToRemove = diff / lastMsg.metadata.inputTokens;
 		if (proportionToRemove > 0.99) {
 			throw new Error(
-				`Max token limit reached - history is too long - reduce the system prompt or task less tasks or remove old messages. ` +
-				`proportion_to_remove: ${proportionToRemove}`
+				`Max token limit reached - history is too long - reduce the system prompt or task less tasks or remove old messages. proportion_to_remove: ${proportionToRemove}`
 			);
 		}
 

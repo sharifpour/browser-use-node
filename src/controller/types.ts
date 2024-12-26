@@ -33,4 +33,6 @@ export interface ActionResult {
 	success: boolean;
 	error?: string;
 	data?: unknown;
+	include_in_memory?: boolean;
+	extracted_content?: string;
 }

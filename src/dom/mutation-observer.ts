@@ -3,11 +3,32 @@ import type { DOMElementNode } from './types';
 import { EventEmitter } from 'node:events';
 
 export interface MutationEvent {
-    type: 'added' | 'removed' | 'modified' | 'attribute';
+    type: 'added' | 'removed' | 'modified';
     target: DOMElementNode;
-    oldValue?: string;
-    newValue?: string;
-    attributeName?: string;
+    timestamp: number;
+}
+
+export interface SerializedNode {
+    tagName: string;
+    attributes: Record<string, string>;
+    textContent: string;
+    children: SerializedNode[];
+    isShadowRoot: boolean;
+}
+
+function serializeNode(node: Element): SerializedNode {
+    const attributes: Record<string, string> = {};
+    for (const attr of node.attributes) {
+        attributes[attr.name] = attr.value;
+    }
+
+    return {
+        tagName: node.tagName,
+        attributes,
+        textContent: node.textContent || '',
+        children: Array.from(node.children).map(child => serializeNode(child as Element)),
+        isShadowRoot: false
+    };
 }
 
 /**
@@ -17,6 +38,8 @@ export class DOMObserverManager extends EventEmitter {
     private isObserving: boolean = false;
     private pollInterval: NodeJS.Timeout | null = null;
     private isDestroyed: boolean = false;
+    private events: MutationEvent[] = [];
+    private observer: MutationObserver | null = null;
 
     constructor(private page: Page) {
         super();
@@ -285,4 +308,8 @@ export class DOMObserverManager extends EventEmitter {
             this.on('mutation', handler);
         });
     }
+
+    private handleMutation = (event: CustomEvent<MutationEvent>): void => {
+        this.events.push(event.detail);
+    };
 }

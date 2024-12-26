@@ -69,7 +69,7 @@ export class Controller {
 			await browser.waitForStableNetwork();
 			const msg = `🔍  Searched for "${validatedParams.query}" in Google`;
 			console.log(msg);
-			return { extracted_content: msg, include_in_memory: true };
+			return { success: true, extracted_content: msg, include_in_memory: true };
 		});
 
 		this.registry.action(
@@ -82,7 +82,7 @@ export class Controller {
 			await page.waitForLoadState();
 			const msg = `🔗  Navigated to ${validatedParams.url}`;
 			console.log(msg);
-			return { extracted_content: msg, include_in_memory: true };
+			return { success: true, extracted_content: msg, include_in_memory: true };
 		});
 
 		this.registry.action(
@@ -94,7 +94,7 @@ export class Controller {
 			await page.waitForLoadState();
 			const msg = '🔙  Navigated back';
 			console.log(msg);
-			return { extracted_content: msg, include_in_memory: true };
+			return { success: true, extracted_content: msg, include_in_memory: true };
 		});
 
 		// Element Interaction Actions
@@ -119,7 +119,7 @@ export class Controller {
 			if (await browser.isFileUploader(elementNode)) {
 				const msg = `Index ${validatedParams.index} - has an element which opens file upload dialog. To upload files please use a specific function to upload files`;
 				console.log(msg);
-				return { extracted_content: msg, include_in_memory: true };
+				return { success: true, extracted_content: msg, include_in_memory: true };
 			}
 
 			try {
@@ -135,10 +135,10 @@ export class Controller {
 					await browser.switchToTab(-1);
 				}
 
-				return { extracted_content: msg, include_in_memory: true };
+				return { success: true, extracted_content: msg, include_in_memory: true };
 			} catch (error) {
 				console.warn(`Element no longer available with index ${validatedParams.index} - most likely the page changed`);
-				return { error: String(error), include_in_memory: true };
+				return { success: false, error: String(error), include_in_memory: true };
 			}
 		});
 
@@ -194,7 +194,7 @@ export class Controller {
 		)(async (_: Record<string, unknown>, browser: BrowserContext): Promise<ActionResult> => {
 			const page = await browser.getPage();
 			const content = await page.evaluate(() => document.body.innerText);
-			const msg = `📄  Extracted page content\n: ${content}\n`;
+			const msg = `��  Extracted page content\n: ${content}\n`;
 			console.log(msg);
 			return { extracted_content: msg, include_in_memory: false };
 		});

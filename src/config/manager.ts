@@ -1,10 +1,9 @@
 import { z } from 'zod';
-import { readFileSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { BrowserConfigSchema } from '../types';
-import { BrowserContextConfig } from '../browser/config';
+import type { BrowserContextConfig } from '../browser/config';
 import { ConfigurationError } from '../errors';
-import { Logger, getLogger } from '../utils/logger';
+import { getLogger } from '../utils/logger';
 
 const logger = getLogger('ConfigManager');
 

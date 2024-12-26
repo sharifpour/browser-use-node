@@ -3,10 +3,11 @@
  */
 
 import type { BrowserContext } from '../browser/context';
-import type { ActionResult } from './types';
+import type { ActionResult, ActionFunction, ActionRegistration } from './types';
 import { z } from 'zod';
 import { ProductTelemetry } from '../telemetry/service';
 import type { ControllerRegisteredFunctionsTelemetryEvent } from './types';
+import { ActionError } from '../errors';
 
 /**
  * Registered action function type
@@ -28,7 +29,7 @@ export interface RegisteredAction {
  * Action registry for browser automation
  */
 export class Registry {
-	private readonly actions: Map<string, RegisteredAction>;
+	private readonly actions: Map<string, ActionRegistration>;
 	private readonly telemetry: ProductTelemetry;
 
 	constructor() {
@@ -39,25 +40,29 @@ export class Registry {
 	/**
 	 * Create parameter model from function
 	 */
-	private createParamModel(func: ActionFunction): z.ZodType<unknown> {
-		// Get function parameters excluding browser
-		const params = new Map<string, z.ZodType<unknown>>();
-		const funcStr = func.toString();
-		const paramMatch = funcStr.match(/\((.*?)\)/);
+	private createParamModel(func: ActionFunction): z.ZodType {
+		// Extract parameter types from function
+		const params = new Map<string, z.ZodType>();
+		const paramNames = this.extractParamNames(func);
 
-		if (paramMatch) {
-			const paramStr = paramMatch[1];
-			const paramList = paramStr.split(',').map(p => p.trim()).filter(p => p !== 'browser');
-
-			for (const param of paramList) {
-				if (param) {
-					// Default to any for now, in real implementation we'd infer types
-					params.set(param, z.any());
-				}
-			}
+		for (const param of paramNames) {
+			// For now, we'll use a generic object schema
+			// In a real implementation, we'd use TypeScript's type system to infer types
+			params.set(param, z.object({}));
 		}
 
-		return z.object(Object.fromEntries(params)).strict();
+		return z.object(Object.fromEntries(params));
+	}
+
+	private extractParamNames(func: ActionFunction): string[] {
+		const funcStr = func.toString();
+		const match = funcStr.match(/\((.*?)\)/);
+		if (!match) return [];
+
+		const params = match[1].split(',').map(p => p.trim());
+		if (params.length === 0 || params[0] === '') return [];
+
+		return params.map(p => p.split(':')[0].trim());
 	}
 
 	/**
@@ -85,11 +90,11 @@ export class Registry {
 			};
 
 			this.actions.set(name, {
-				name,
-				description,
 				function: wrappedFunc,
-				paramModel,
-				requiresBrowser
+				options: {
+					paramModel: options.paramModel ?? this.createParamModel(func),
+					requiresBrowser: options.requiresBrowser ?? true
+				}
 			});
 
 			// Send telemetry
@@ -110,7 +115,7 @@ export class Registry {
 	/**
 	 * Get a registered action
 	 */
-	public getAction(name: string): RegisteredAction | undefined {
+	public getAction(name: string): ActionRegistration | undefined {
 		return this.actions.get(name);
 	}
 
@@ -124,22 +129,15 @@ export class Registry {
 	): Promise<ActionResult> {
 		const action = this.actions.get(name);
 		if (!action) {
-			throw new Error(`Action "${name}" not registered`);
+			throw new Error(`Action ${name} is not registered`);
+		}
+
+		if (action.options.requiresBrowser && !browser) {
+			throw new Error(`Action ${name} requires a browser context`);
 		}
 
 		try {
-			// Validate parameters
-			const validatedParams = action.paramModel.parse(params);
-
-			// Check browser requirement
-			if (action.requiresBrowser && !browser) {
-				throw new Error(`Action "${name}" requires browser context`);
-			}
-
-			// Execute action
-			const result = await action.function(validatedParams as Record<string, unknown>, browser);
-
-			// Validate result
+			const result = await action.function(params, browser);
 			return this.validateActionResult(result);
 		} catch (error) {
 			throw this.formatError(error);
@@ -160,7 +158,7 @@ export class Registry {
 	/**
 	 * Get all registered actions
 	 */
-	public getRegisteredActions(): RegisteredAction[] {
+	public getRegisteredActions(): ActionRegistration[] {
 		return Array.from(this.actions.values());
 	}
 
@@ -170,7 +168,7 @@ export class Registry {
 	public createActionModel(): z.ZodType<unknown> {
 		const actionSchemas: Record<string, z.ZodType<unknown>> = {};
 		for (const [name, action] of this.actions.entries()) {
-			actionSchemas[name] = action.paramModel;
+			actionSchemas[name] = action.options.paramModel;
 		}
 		return z.object(actionSchemas).partial().strict();
 	}
@@ -215,17 +213,17 @@ export class Registry {
 	/**
 	 * Get action prompt description
 	 */
-	private getActionPromptDescription(action: RegisteredAction): string {
+	private getActionPromptDescription(action: ActionRegistration): string {
 		const skipKeys = ['title'];
 		let description = `${action.description}:\n`;
 		description += `{${action.name}: `;
 
 		// Get schema properties excluding skipped keys
-		const schema = action.paramModel.safeParse({});
+		const schema = action.options.paramModel.safeParse({});
 		if (schema.success) {
 			description += '{}';
 		} else {
-			const properties = Object.entries(action.paramModel['shape'] ?? {})
+			const properties = Object.entries(action.options.paramModel['shape'] ?? {})
 				.filter(([key]) => !skipKeys.includes(key))
 				.reduce((acc, [key, value]) => {
 					acc[key] = value;
@@ -241,36 +239,26 @@ export class Registry {
 	/**
 	 * Format error message
 	 */
-	private formatError(error: unknown): Error {
-		if (error instanceof z.ZodError) {
-			return new Error(`Invalid parameters: ${error.errors.map(e => e.message).join(', ')}`);
-		}
+	private formatError(error: Error | unknown): Error {
 		if (error instanceof Error) {
-			return error;
+			return new ActionError(error.message, 'execution', true);
 		}
-		return new Error(String(error));
+		return new ActionError('Unknown error occurred', 'execution', true);
 	}
 
 	/**
 	 * Validate action result
 	 */
-	private validateActionResult(result: unknown): ActionResult {
+	private validateActionResult(result: ActionResult): ActionResult {
 		if (!result || typeof result !== 'object') {
 			throw new Error('Invalid action result: must be an object');
 		}
 
-		const { is_done, extracted_content, error, include_in_memory } = result as ActionResult;
-
-		if (
-			(typeof is_done !== 'boolean' && is_done !== undefined) ||
-			(typeof extracted_content !== 'string' && extracted_content !== undefined) ||
-			(typeof error !== 'string' && error !== undefined) ||
-			typeof include_in_memory !== 'boolean'
-		) {
-			throw new Error('Invalid action result: invalid property types');
+		if (typeof result.success !== 'boolean') {
+			throw new Error('Invalid action result: missing success property');
 		}
 
-		return result as ActionResult;
+		return result;
 	}
 }
 
