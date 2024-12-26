@@ -2,61 +2,52 @@
  * Main library exports
  */
 
-export {
-	Agent,
-	AgentError,
-	SystemPrompt,
-	MessageManager,
-	AgentHistory as AgentHistoryImpl,
-	AgentHistoryList
-} from "./agent";
-
-export type {
-	AgentConfig,
-	AgentStatus,
-	AgentOutput,
-	AgentState,
-	AgentMessage,
-	AgentHistory,
-	AgentStepInfo,
-} from "./agent/types";
-
-export type {
-	BrowserConfig,
-	BrowserState,
-	BrowserSession,
-	BrowserStateHistory,
-	TabInfo,
-	BrowserContextConfig,
-	PlaywrightBrowser,
-	PlaywrightBrowserContext,
-	PlaywrightPage
-} from "./browser/types";
+export * from './browser/context';
+export * from './browser/types';
+export * from './controller/controller';
+export * from './controller/types';
+export * from './dom/types';
+export * from './config/types';
+export * from './agent/types';
 
 export type {
 	DOMElementNode,
+	DOMTextNode,
+	DOMBaseNode,
 	DOMHistoryElement,
+	DOMState,
 	DOMQueryOptions,
 	ElementSelector,
-	DOMObservation,
-	DOMBaseNode,
-	DOMState
-} from "./dom/types";
+	DOMObservation
+} from './dom/types';
 
 export type {
-	ActionResult,
-	ActionFunction,
-	ActionValidationResult,
-	ActionContext,
-	ActionState,
-	ActionOptions,
-	ActionModel,
-	ActionHandler,
-	ActionRegistration
-} from "./controller/types";
+	BrowserState,
+	BrowserSession,
+	BrowserConfig,
+	TabInfo
+} from './browser/types';
 
-export { Browser } from "./browser";
-export { BrowserContext } from "./browser/context";
-export { Controller } from "./controller";
-export { DOMService } from "./dom/service";
-export { ConfigManager } from "./config/manager";
+export type {
+	ActionFunction,
+	ActionOptions,
+	ActionRegistration,
+	ActionResult
+} from './controller/types';
+
+export type {
+	ConfigOptions,
+	LoggingConfig,
+	LogLevel,
+	BrowserConfigSchema
+} from './config/types';
+
+export type {
+	AgentConfig,
+	AgentState,
+	AgentStatus,
+	AgentMessage,
+	AgentHistory,
+	AgentStepInfo,
+	AgentOutput
+} from './agent/types';
