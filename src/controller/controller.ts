@@ -304,25 +304,10 @@ export class Controller {
 			const page = await browser.getPage();
 
 			try {
-				const options = await page.evaluate((xpath) => {
-					const element = document.evaluate(
-						xpath,
-						document,
-						null,
-						XPathResult.FIRST_ORDERED_NODE_TYPE,
-						null
-					).singleNodeValue as HTMLSelectElement;
-
-					if (!element || element.tagName.toLowerCase() !== 'select') {
-						throw new Error('Element is not a select dropdown');
-					}
-
-					return Array.from(element.options).map(option => ({
-						text: option.text,
-						value: option.value,
-						selected: option.selected
-					}));
-				}, elementNode.xpath);
+				const options = Array.from(element.options).map(option => ({
+					value: option.value,
+					text: option.text
+				}));
 
 				const msg = `📝 Available options for dropdown ${validatedParams.index}:\n${options.map(opt => `- ${opt.text} (${opt.value})${opt.selected ? ' [selected]' : ''}`).join('\n')
 					}`;
@@ -376,24 +361,17 @@ export class Controller {
 						element.dispatchEvent(new Event('change', { bubbles: true }));
 					},
 					{ xpath: elementNode.xpath, text: validatedParams.text }
-						return Array.from(element.options).map(option => ({
-							text: option.text,
-							value: option.value,
-							selected: option.selected
-						}));
-					}, elementNode.xpath);
+				);
 
-					const msg = `📝 Available options for dropdown ${validatedParams.index}:\n${
-						options.map(opt => `- ${opt.text} (${opt.value})${opt.selected ? ' [selected]' : ''}`).join('\n')
-					}`;
-					console.log(msg);
-					return { extracted_content: msg, include_in_memory: true };
-				} catch (error) {
-					return { error: String(error), include_in_memory: true };
-				}
-			},
-			{ paramModel: GetDropdownOptionsActionSchema, requiresBrowser: true }
-		);
+				const msg = `📝 Available options for dropdown ${validatedParams.index}:\n${
+					options.map(opt => `- ${opt.text} (${opt.value})${opt.selected ? ' [selected]' : ''}`).join('\n')
+				}`;
+				console.log(msg);
+				return { extracted_content: msg, include_in_memory: true };
+			} catch (error) {
+				return { error: String(error), include_in_memory: true };
+			}
+		});
 
 		this.registry.action(
 			'Select dropdown option for interactive element index by the text of the option you want to select',

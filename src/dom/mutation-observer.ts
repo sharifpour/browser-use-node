@@ -1,6 +1,6 @@
 import type { Page } from 'playwright';
 import type { DOMElementNode } from './types';
-import { EventEmitter } from 'events';
+import { EventEmitter } from 'node:events';
 
 export interface MutationEvent {
     type: 'added' | 'removed' | 'modified' | 'attribute';

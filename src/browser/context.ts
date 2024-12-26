@@ -4,7 +4,7 @@
 
 import type { Page, BrowserContext as PlaywrightContext, ElementHandle, FrameLocator, Cookie, Request, Route, Response, ConsoleMessage, Dialog, FileChooser, WebSocket, Worker } from "playwright";
 import type { Browser } from "./browser";
-import type { BrowserSession, BrowserState, BrowserStateHistory, TabInfo } from "./types";
+import type { BrowserState, BrowserStateHistory, TabInfo } from "./types";
 import type { DOMElementNode } from "../dom/types";
 import type { BrowserContextConfig } from "./config";
 import { DOMService } from "../dom/service";
@@ -12,6 +12,7 @@ import { writeFile } from "node:fs/promises";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import { v4 as uuidv4 } from 'uuid';
+import { SecurityService } from '../services/security';
 
 const DEFAULT_CONFIG: BrowserContextConfig = {
 	minimumWaitPageLoadTime: 0.5,
@@ -74,6 +75,23 @@ export type PageEventHandler = {
 };
 
 /**
+ * Information about a browser tab
+ */
+interface TabInfo {
+	pageId: number;
+	url: string;
+	title: string;
+}
+
+/**
+ * Browser session information
+ */
+interface BrowserSession {
+	context: BrowserContext;
+	currentPage: Page;
+}
+
+/**
  * Browser context with enhanced capabilities
  */
 export class BrowserContext {
@@ -81,7 +99,7 @@ export class BrowserContext {
 	private readonly config: BrowserContextConfig;
 	private browser: Browser;
 	private context: PlaywrightContext | null = null;
-	private activePage: Page | null = null;
+	private currentPage: Page | null = null;
 	private domService: DOMService | null = null;
 	private session: BrowserSession = {
 		cachedState: {
@@ -91,6 +109,7 @@ export class BrowserContext {
 	private requestInterceptors: RequestInterceptor[] = [];
 	private responseInterceptors: ResponseInterceptor[] = [];
 	private eventHandlers: Partial<Record<PageEventType, PageEventHandler[keyof PageEventHandler][]>> = {};
+	private securityService: SecurityService;
 
 	constructor(browser: Browser, config: Partial<BrowserContextConfig> = {}) {
 		this.contextId = uuidv4();
@@ -99,6 +118,9 @@ export class BrowserContext {
 			...config
 		};
 		this.browser = browser;
+
+		// Initialize security service
+		this.securityService = SecurityService.getInstance();
 	}
 
 	/**
@@ -128,19 +150,74 @@ export class BrowserContext {
 		const playwrightBrowser = await this.browser.getPlaywrightBrowser();
 
 		// Create context with configuration
-		this.context = await playwrightBrowser.newContext({
-			viewport: this.config.noViewport ? null : this.config.browserWindowSize,
-			recordVideo: this.config.saveRecordingPath ? {
-				dir: this.config.saveRecordingPath
-			} : undefined,
-			ignoreHTTPSErrors: this.config.disableSecurity,
+		this.context = await this.createContext(playwrightBrowser);
+
+		// Load cookies if file exists
+		if (this.config.cookiesFile) {
+			try {
+				const fs = await import("node:fs/promises");
+				const cookies = JSON.parse(
+					await fs.readFile(this.config.cookiesFile, "utf-8")
+				);
+				await this.context.addCookies(cookies);
+			} catch (error) {
+				console.warn("Failed to load cookies:", error);
+			}
+		}
+
+		// Start tracing if path provided
+		if (this.config.tracePath) {
+			await this.context.tracing.start({
+				screenshots: true,
+				snapshots: true,
+				sources: true
+			});
+		}
+	}
+
+	private async createContext(browser: PlaywrightBrowser): Promise<PlaywrightBrowserContext> {
+		if (this.browser.config.chromeInstancePath && browser.contexts.length > 0) {
+			// Connect to existing Chrome instance instead of creating new one
+			return browser.contexts[0];
+		}
+
+		// Get security configuration
+		const securityConfig = this.securityService.getBrowserContextConfig();
+
+		// Create new context with security settings
+		const context = await browser.newContext({
+			viewport: this.config.browserWindowSize,
+			noViewport: false,
 			userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36',
 			javaScriptEnabled: true,
-			bypassCSP: this.config.disableSecurity
+			bypassCSP: securityConfig.bypassCSP,
+			ignoreHTTPSErrors: securityConfig.ignoreHTTPSErrors,
+			recordVideo: this.config.saveRecordingPath ? { dir: this.config.saveRecordingPath } : undefined
 		});
 
+		if (this.config.tracePath) {
+			await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
+		}
+
+		// Load cookies if they exist
+		if (this.config.cookiesFile && fs.existsSync(this.config.cookiesFile)) {
+			const cookies = JSON.parse(fs.readFileSync(this.config.cookiesFile, 'utf-8'));
+			logger.info(`Loaded ${cookies.length} cookies from ${this.config.cookiesFile}`);
+
+			// Apply cookie security options
+			const cookieOptions = this.securityService.getCookieOptions();
+			const securedCookies = cookies.map((cookie: any) => ({
+				...cookie,
+				secure: cookieOptions.secure,
+				httpOnly: cookieOptions.httpOnly,
+				sameSite: cookieOptions.sameSite
+			}));
+
+			await context.addCookies(securedCookies);
+		}
+
 		// Add anti-detection scripts
-		await this.context.addInitScript(`
+		await context.addInitScript(`
 			// Webdriver property
 			Object.defineProperty(navigator, 'webdriver', {
 				get: () => undefined
@@ -168,45 +245,72 @@ export class BrowserContext {
 			);
 		`);
 
-		// Load cookies if file exists
-		if (this.config.cookiesFile) {
-			try {
-				const fs = await import("node:fs/promises");
-				const cookies = JSON.parse(
-					await fs.readFile(this.config.cookiesFile, "utf-8")
-				);
-				await this.context.addCookies(cookies);
-			} catch (error) {
-				console.warn("Failed to load cookies:", error);
-			}
-		}
-
-		// Start tracing if path provided
-		if (this.config.tracePath) {
-			await this.context.tracing.start({
-				screenshots: true,
-				snapshots: true,
-				sources: true
-			});
-		}
+		return context;
 	}
 
 	/**
-	 * Click on an element node
+	 * Click on an element node with enhanced reliability
 	 */
 	public async clickElementNode(elementNode: DOMElementNode): Promise<void> {
 		const page = await this.getPage();
-		const element = await page.locator(elementNode.xpath);
-		await element.click();
+
+		try {
+			const element = await this.getLocateElement(elementNode);
+			if (!element) {
+				throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
+			}
+
+			// Ensure element is in view
+			await element.scrollIntoViewIfNeeded()
+				.catch(() => console.warn('Could not scroll element into view'));
+
+			try {
+				// Try native click first
+				await element.click({ timeout: 1500 });
+				await this.waitForPageLoad();
+			} catch (error) {
+				try {
+					// Fallback to JavaScript click
+					await page.evaluate((el) => {
+						el.click();
+					}, element);
+					await this.waitForPageLoad();
+				} catch (jsError) {
+					throw new Error(`Failed to click element: ${jsError instanceof Error ? jsError.message : 'Unknown error'}`);
+				}
+			}
+		} catch (error) {
+			throw new Error(`Failed to click element: ${JSON.stringify(elementNode)}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
 	}
 
 	/**
-	 * Input text into an element node
+	 * Input text into an element node with enhanced reliability
 	 */
 	public async inputTextElementNode(elementNode: DOMElementNode, text: string): Promise<void> {
-		const page = await this.getPage();
-		const element = await page.locator(elementNode.xpath);
-		await element.fill(text);
+		try {
+			const page = await this.getPage();
+			const element = await this.getLocateElement(elementNode);
+
+			if (!element) {
+				throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
+			}
+
+			// Ensure element is in view
+			await element.scrollIntoViewIfNeeded({ timeout: 2500 })
+				.catch(() => console.warn('Could not scroll element into view'));
+
+			// Clear existing text first
+			await element.fill('');
+
+			// Type text character by character
+			await element.type(text);
+
+			// Wait for any potential dynamic updates
+			await this.waitForPageLoad();
+		} catch (error) {
+			throw new Error(`Failed to input text into element: ${JSON.stringify(elementNode)}. Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
 	}
 
 	/**
@@ -230,11 +334,11 @@ export class BrowserContext {
 			await this.init();
 		}
 
-		if (!this.activePage) {
-			this.activePage = await this.context.newPage();
+		if (!this.currentPage) {
+			this.currentPage = await this.context.newPage();
 		}
 
-		return this.activePage;
+		return this.currentPage;
 	}
 
 	/**
@@ -289,7 +393,7 @@ export class BrowserContext {
 		} finally {
 			// Clear references
 			this.context = null;
-			this.activePage = null;
+			this.currentPage = null;
 			this.domService = null;
 			this.session = {
 				cachedState: {
@@ -306,17 +410,30 @@ export class BrowserContext {
 	 * Save current cookies to file
 	 */
 	private async saveCookies(): Promise<void> {
-		if (!this.context || !this.config.cookiesFile) return;
+		if (this.session?.context && this.config.cookiesFile) {
+			try {
+				const cookies = await this.session.context.cookies();
+				logger.info(`Saving ${cookies.length} cookies to ${this.config.cookiesFile}`);
 
-		try {
-			const cookies = await this.context.cookies();
-			await mkdir(dirname(this.config.cookiesFile), { recursive: true });
-			await writeFile(
-				this.config.cookiesFile,
-				JSON.stringify(cookies, null, 2)
-			);
-		} catch (error) {
-			console.warn("Failed to save cookies:", error);
+				// Apply cookie security options
+				const cookieOptions = this.securityService.getCookieOptions();
+				const securedCookies = cookies.map(cookie => ({
+					...cookie,
+					secure: cookieOptions.secure,
+					httpOnly: cookieOptions.httpOnly,
+					sameSite: cookieOptions.sameSite
+				}));
+
+				// Create directory if it doesn't exist
+				const dirname = path.dirname(this.config.cookiesFile);
+				if (dirname) {
+					fs.mkdirSync(dirname, { recursive: true });
+				}
+
+				fs.writeFileSync(this.config.cookiesFile, JSON.stringify(securedCookies));
+			} catch (error) {
+				logger.warning(`Failed to save cookies: ${error}`);
+			}
 		}
 	}
 
@@ -324,47 +441,171 @@ export class BrowserContext {
 	 * Get the current session
 	 */
 	async getSession(): Promise<BrowserSession> {
-		return this.session;
+		if (!this.context) {
+			await this.init();
+		}
+		return {
+			context: this.context!,
+			currentPage: this.currentPage!
+		};
 	}
 
 	/**
 	 * Get the current state of the browser
+	 * @param useVision Whether to include a screenshot in the state
 	 */
-	async getState(): Promise<BrowserState> {
-		const domService = await this.getDOMService();
-		const state = await domService.getState();
-		const [url, title] = await Promise.all([
-			this.activePage.url(),
-			this.activePage.title()
-		]);
+	public async getState(useVision: boolean = false): Promise<BrowserState> {
+		await this.waitForPageLoad();
+		const session = await this.getSession();
+		const state = await this.updateState(useVision);
 
-		const tabs = await this.getTabs();
-		const screenshot = await this.getScreenshot();
+		// Save cookies if a file is specified
+		if (this.config.cookiesFile) {
+			this.saveCookies().catch(error =>
+				console.warn('Failed to save cookies:', error)
+			);
+		}
 
-		return {
-			url,
-			title,
-			tabs,
-			domTree: state.elementTree,
-			clickableElements: state.elementTree.children.filter(child =>
-				'isInteractive' in child && child.isInteractive
-			) as DOMElementNode[],
-			selectorMap: state.selectorMap,
-			screenshot
-		};
+		return state;
+	}
+
+	/**
+	 * Update and return state
+	 * @param useVision Whether to include a screenshot in the state
+	 */
+	private async updateState(useVision: boolean = false): Promise<BrowserState> {
+		const session = await this.getSession();
+
+		// Check if current page is still valid, if not switch to another available page
+		try {
+			const page = await this.getPage();
+			// Test if page is still accessible
+			await page.evaluate('1');
+		} catch (error) {
+			console.debug('Current page is no longer accessible:', error);
+			// Get all available pages
+			const pages = session.context.pages();
+			if (pages.length > 0) {
+				this.currentPage = pages[pages.length - 1];
+				console.debug(`Switched to page: ${await this.currentPage.title()}`);
+			} else {
+				throw new Error('No valid pages available');
+			}
+		}
+
+		try {
+			await this.removeHighlights();
+			const page = await this.getPage();
+			const domService = new DOMService(page);
+			const content = await domService.getClickableElements();
+
+			let screenshotBase64: string | undefined;
+			if (useVision) {
+				screenshotBase64 = await this.takeScreenshot();
+			}
+
+			const state: BrowserState = {
+				elementTree: content.elementTree,
+				selectorMap: content.selectorMap,
+				url: page.url(),
+				title: await page.title(),
+				tabs: await this.getTabsInfo(),
+				screenshot: screenshotBase64
+			};
+
+			return state;
+		} catch (error) {
+			console.error('Failed to update state:', error);
+			// Return last known good state if available
+			if (this.currentState) {
+				return this.currentState;
+			}
+			throw error;
+		}
+	}
+
+	/**
+	 * Take a screenshot of the current page
+	 * @param fullPage Whether to take a full page screenshot
+	 */
+	private async takeScreenshot(fullPage: boolean = false): Promise<string> {
+		const page = await this.getPage();
+
+		const screenshot = await page.screenshot({
+			fullPage,
+			animations: 'disabled'
+		});
+
+		return screenshot.toString('base64');
+	}
+
+	/**
+	 * Save cookies to file
+	 */
+	private async saveCookies(): Promise<void> {
+		const session = await this.getSession();
+		if (session && session.context && this.config.cookiesFile) {
+			try {
+				const cookies = await session.context.cookies();
+				console.info(`Saving ${cookies.length} cookies to ${this.config.cookiesFile}`);
+
+				// Check if the path is a directory and create it if necessary
+				const dirname = path.dirname(this.config.cookiesFile);
+				if (dirname) {
+					await fs.mkdir(dirname, { recursive: true });
+				}
+
+				await fs.writeFile(
+					this.config.cookiesFile,
+					JSON.stringify(cookies),
+					'utf-8'
+				);
+			} catch (error) {
+				console.warn('Failed to save cookies:', error);
+			}
+		}
+	}
+
+	/**
+	 * Remove highlight overlays from the page
+	 */
+	private async removeHighlights(): Promise<void> {
+		try {
+			const page = await this.getPage();
+			await page.evaluate(`
+				try {
+					// Remove the highlight container and all its contents
+					const container = document.getElementById('playwright-highlight-container');
+					if (container) {
+						container.remove();
+					}
+
+					// Remove highlight attributes from elements
+					const highlightedElements = document.querySelectorAll('[browser-user-highlight-id^="playwright-highlight-"]');
+					highlightedElements.forEach(el => {
+						el.removeAttribute('browser-user-highlight-id');
+					});
+				} catch (e) {
+					console.error('Failed to remove highlights:', e);
+				}
+			`);
+		} catch (error) {
+			console.debug('Failed to remove highlights (this is usually ok):', error);
+			// Don't raise the error since this is not critical functionality
+		}
 	}
 
 	/**
 	 * Get the browser state history
 	 */
 	async getStateHistory(): Promise<BrowserStateHistory> {
-		if (!this.activePage) {
+		if (!this.currentPage) {
 			throw new Error("No active page");
 		}
 
 		const [url, title] = await Promise.all([
-			this.activePage.url(),
-			this.activePage.title()
+			this.currentPage.url(),
+			this.currentPage.title()
 		]);
 
 		const tabs = await this.getTabs();
@@ -406,34 +647,82 @@ export class BrowserContext {
 	}
 
 	private async getScreenshot(): Promise<string | undefined> {
-		if (!this.activePage || !this.config.saveScreenshots) {
+		if (!this.currentPage || !this.config.saveScreenshots) {
 			return undefined;
 		}
 
-		const buffer = await this.activePage.screenshot({ type: 'png' });
+		const buffer = await this.currentPage.screenshot({ type: 'png' });
 		return buffer.toString('base64');
 	}
 
 	/**
-	 * Wait for page to load
+	 * Wait for page load with network idle detection
+	 * @param timeoutOverwrite Optional timeout override in milliseconds
 	 */
-	private async waitForPageLoad(): Promise<void> {
+	private async waitForPageLoad(timeoutOverwrite?: number): Promise<void> {
+		const startTime = Date.now();
 		const page = await this.getPage();
 
-		// Wait minimum time
-		await page.waitForTimeout(this.config.minimumWaitPageLoadTime * 1000);
-
 		try {
-			// Wait for network idle
-			await page.waitForLoadState("networkidle", {
-				timeout: this.config.waitForNetworkIdlePageLoadTime * 1000
+			// Wait for network to be idle
+			await page.waitForLoadState('networkidle', {
+				timeout: this.config.maximumWaitPageLoadTime * 1000
 			});
-		} catch {
-			// Ignore timeout
-		}
 
-		// Wait between actions
-		await page.waitForTimeout(this.config.waitBetweenActions * 1000);
+			// Calculate remaining time to meet minimum wait time
+			const elapsed = (Date.now() - startTime) / 1000;
+			const remaining = Math.max(
+				((timeoutOverwrite ?? this.config.minimumWaitPageLoadTime) - elapsed) * 1000,
+				0
+			);
+
+			console.debug(
+				`--Page loaded in ${elapsed.toFixed(2)} seconds, waiting for additional ${(remaining/1000).toFixed(2)} seconds`
+			);
+
+			// Sleep remaining time if needed
+			if (remaining > 0) {
+				await new Promise(resolve => setTimeout(resolve, remaining));
+			}
+		} catch (error) {
+			console.warn('Page load failed, continuing...', error);
+		}
+	}
+
+	/**
+	 * Navigate to a URL
+	 */
+	public async navigateTo(url: string): Promise<void> {
+		const page = await this.getPage();
+		await page.goto(url);
+		await this.waitForPageLoad();
+	}
+
+	/**
+	 * Refresh the current page
+	 */
+	public async refreshPage(): Promise<void> {
+		const page = await this.getPage();
+		await page.reload();
+		await this.waitForPageLoad();
+	}
+
+	/**
+	 * Navigate back in history
+	 */
+	public async goBack(): Promise<void> {
+		const page = await this.getPage();
+		await page.goBack();
+		await this.waitForPageLoad();
+	}
+
+	/**
+	 * Navigate forward in history
+	 */
+	public async goForward(): Promise<void> {
+		const page = await this.getPage();
+		await page.goForward();
+		await this.waitForPageLoad();
 	}
 
 	/**
@@ -444,8 +733,8 @@ export class BrowserContext {
 
 		const pages = this.context.pages();
 		if (index >= 0 && index < pages.length) {
-			this.activePage = pages[index];
-			await this.activePage.bringToFront();
+			this.currentPage = pages[index];
+			await this.currentPage.bringToFront();
 		} else {
 			throw new Error(`Invalid tab index: ${index}`);
 		}
@@ -457,54 +746,54 @@ export class BrowserContext {
 	async createNewTab(url?: string): Promise<void> {
 		if (!this.context) throw new Error("Browser context not initialized");
 
-		this.activePage = await this.context.newPage();
+		this.currentPage = await this.context.newPage();
 		if (url) {
-			await this.activePage.goto(url);
+			await this.currentPage.goto(url);
 			await this.waitForPageLoad();
 		}
 	}
 
 	/**
-	 * Check if element is a file uploader
+	 * Check if element or its children are file uploaders
+	 * @param elementNode The element to check
+	 * @param maxDepth Maximum depth to check children
+	 * @param currentDepth Current depth in recursion
 	 */
-	async isFileUploader(elementNode: DOMElementNode): Promise<boolean> {
-		return elementNode.tagName.toLowerCase() === "input" &&
-			(elementNode.attributes.type === "file" ||
-				elementNode.attributes.accept !== undefined);
-	}
-
-	/**
-	 * Navigate forward in history
-	 */
-	public async goForward(): Promise<void> {
-		const page = await this.getPage();
-
-		// Navigate forward
-		await page.goForward();
-
-		// Wait for minimum load time
-		await page.waitForTimeout(this.config.minimumWaitPageLoadTime * 1000);
-
-		try {
-			// Wait for network idle
-			await page.waitForLoadState("networkidle", {
-				timeout: this.config.waitForNetworkIdlePageLoadTime * 1000
-			});
-		} catch (error) {
-			console.warn('Network idle timeout reached:', error);
+	public async isFileUploader(
+		elementNode: DOMElementNode,
+		maxDepth: number = 3,
+		currentDepth: number = 0
+	): Promise<boolean> {
+		if (currentDepth > maxDepth) {
+			return false;
 		}
 
-		// Wait for all frames to load
-		const frames = page.frames();
-		await Promise.all(
-			frames.map(frame =>
-				frame.waitForLoadState('load')
-					.catch(error => console.warn(`Frame load error: ${error}`))
-			)
-		);
+		// Check current element
+		let isUploader = false;
 
-		// Wait between actions
-		await page.waitForTimeout(this.config.waitBetweenActions * 1000);
+		if (elementNode.tag_name === 'input') {
+			isUploader = (
+				elementNode.attributes.type === 'file' ||
+				elementNode.attributes.accept !== undefined
+			);
+		}
+
+		if (isUploader) {
+			return true;
+		}
+
+		// Recursively check children
+		if (elementNode.children && currentDepth < maxDepth) {
+			for (const child of elementNode.children) {
+				if (child instanceof DOMElementNode) {
+					if (await this.isFileUploader(child, maxDepth, currentDepth + 1)) {
+						return true;
+					}
+				}
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -527,11 +816,11 @@ export class BrowserContext {
 		if (pages.length > 1) {
 			// Switch to the next tab if available, otherwise previous
 			const newIndex = currentIndex < pages.length - 1 ? currentIndex : currentIndex - 1;
-			this.activePage = pages[newIndex];
-			await this.activePage.bringToFront();
+			this.currentPage = pages[newIndex];
+			await this.currentPage.bringToFront();
 		} else {
 			// If this was the last tab, create a new blank tab
-			this.activePage = await context.newPage();
+			this.currentPage = await context.newPage();
 		}
 
 		// Clear any cached state
@@ -1610,12 +1899,182 @@ export class BrowserContext {
 	}
 
 	/**
-	 * Wait for network to stabilize
+	 * Wait for network to become stable
 	 */
 	public async waitForStableNetwork(): Promise<void> {
 		const page = await this.getPage();
-		await page.waitForLoadState('networkidle', {
-			timeout: this.config.waitForNetworkIdlePageLoadTime * 1000
-		});
+
+		const pendingRequests = new Set<Request>();
+		let lastActivity = Date.now();
+
+		// Define relevant resource types and content types
+		const RELEVANT_RESOURCE_TYPES = new Set([
+			'document',
+			'stylesheet',
+			'image',
+			'font',
+			'script',
+			'iframe'
+		]);
+
+		const RELEVANT_CONTENT_TYPES = new Set([
+			'text/html',
+			'text/css',
+			'application/javascript',
+			'image/',
+			'font/',
+			'application/json'
+		]);
+
+		// Additional patterns to filter out
+		const IGNORED_URL_PATTERNS = new Set([
+			// Analytics and tracking
+			'analytics',
+			'tracking',
+			'telemetry',
+			'beacon',
+			'metrics',
+			// Ad-related
+			'doubleclick',
+			'adsystem',
+			'adserver',
+			'advertising',
+			// Social media widgets
+			'facebook.com/plugins',
+			'platform.twitter',
+			'linkedin.com/embed',
+			// Live chat and support
+			'livechat',
+			'zendesk',
+			'intercom',
+			'crisp.chat',
+			'hotjar',
+			// Push notifications
+			'push-notifications',
+			'onesignal',
+			'pushwoosh',
+			// Background sync/heartbeat
+			'heartbeat',
+			'ping',
+			'alive',
+			// WebRTC and streaming
+			'webrtc',
+			'rtmp://',
+			'wss://',
+			// Common CDNs for dynamic content
+			'cloudfront.net',
+			'fastly.net'
+		]);
+
+		const onRequest = (request: Request) => {
+			// Filter by resource type
+			if (!RELEVANT_RESOURCE_TYPES.has(request.resourceType())) {
+				return;
+			}
+
+			// Filter out streaming, websocket, and other real-time requests
+			if (['websocket', 'media', 'eventsource', 'manifest', 'other'].includes(request.resourceType())) {
+				return;
+			}
+
+			// Filter out by URL patterns
+			const url = request.url().toLowerCase();
+			if ([...IGNORED_URL_PATTERNS].some(pattern => url.includes(pattern))) {
+				return;
+			}
+
+			// Filter out data URLs and blob URLs
+			if (url.startsWith('data:') || url.startsWith('blob:')) {
+				return;
+			}
+
+			// Filter out requests with certain headers
+			const headers = request.headers();
+			if (
+				headers['purpose'] === 'prefetch' ||
+				headers['sec-fetch-dest'] === 'video' ||
+				headers['sec-fetch-dest'] === 'audio'
+			) {
+				return;
+			}
+
+			pendingRequests.add(request);
+			lastActivity = Date.now();
+		};
+
+		const onResponse = async (response: Response) => {
+			const request = response.request();
+			if (!pendingRequests.has(request)) {
+				return;
+			}
+
+			// Filter by content type if available
+			const contentType = response.headers()['content-type']?.toLowerCase() || '';
+
+			// Skip if content type indicates streaming or real-time data
+			if (
+				contentType.includes('streaming') ||
+				contentType.includes('video') ||
+				contentType.includes('audio') ||
+				contentType.includes('webm') ||
+				contentType.includes('mp4') ||
+				contentType.includes('event-stream') ||
+				contentType.includes('websocket') ||
+				contentType.includes('protobuf')
+			) {
+				pendingRequests.delete(request);
+				return;
+			}
+
+			// Only process relevant content types
+			if (![...RELEVANT_CONTENT_TYPES].some(ct => contentType.includes(ct))) {
+				pendingRequests.delete(request);
+				return;
+			}
+
+			// Skip if response is too large (likely not essential for page load)
+			const contentLength = response.headers()['content-length'];
+			if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) { // 5MB
+				pendingRequests.delete(request);
+				return;
+			}
+
+			pendingRequests.delete(request);
+			lastActivity = Date.now();
+		};
+
+		// Attach event listeners
+		page.on('request', onRequest);
+		page.on('response', onResponse);
+
+		try {
+			// Wait for idle time
+			const startTime = Date.now();
+			while (true) {
+				await new Promise(resolve => setTimeout(resolve, 100));
+				const now = Date.now();
+				if (
+					pendingRequests.size === 0 &&
+					(now - lastActivity) >= this.config.waitForNetworkIdlePageLoadTime * 1000
+				) {
+					break;
+				}
+				if (now - startTime > this.config.maximumWaitPageLoadTime * 1000) {
+					console.debug(
+						`Network timeout after ${this.config.maximumWaitPageLoadTime}s with ${pendingRequests.size} ` +
+						`pending requests: ${[...pendingRequests].map(r => r.url())}`
+					);
+					break;
+				}
+			}
+		} finally {
+			// Clean up event listeners
+			page.removeListener('request', onRequest);
+			page.removeListener('response', onResponse);
+		}
+
+		console.debug(
+			`Network stabilized for ${this.config.waitForNetworkIdlePageLoadTime} seconds`
+		);
 	}
 }

@@ -2,8 +2,13 @@
  * Browser types and interfaces
  */
 
-import type { Page, BrowserContext as PlaywrightContext } from "playwright";
+import type { Page, Browser as PlaywrightBrowserType, BrowserContext as PlaywrightContextType } from 'playwright';
+import type { Cookie } from 'playwright';
 import type { DOMElementNode, DOMHistoryElement } from "../dom/types";
+
+export type PlaywrightBrowser = PlaywrightBrowserType;
+export type PlaywrightBrowserContext = PlaywrightContextType;
+export type PlaywrightPage = Page;
 
 /**
  * Tab information
@@ -29,9 +34,9 @@ export interface TabInfo {
  * Browser session state
  */
 export interface BrowserSession {
-	context?: PlaywrightContext;
-	currentPage?: Page;
-	cachedState: BrowserState;
+	context: PlaywrightBrowserContext;
+	state: BrowserState;
+	tabs: TabInfo[];
 }
 
 /**

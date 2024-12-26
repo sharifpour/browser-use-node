@@ -1,14 +1,51 @@
 import { z } from "zod";
-import { ActionError } from "./errors";
+import type { BrowserContext } from '../browser/context';
 
 /**
- * Result of executing an action
+ * Base action types
  */
 export interface ActionResult {
 	is_done?: boolean;
 	extracted_content?: string;
 	error?: string;
 	include_in_memory: boolean;
+}
+
+export interface ActionContext {
+	requiresBrowser: boolean;
+	paramModel?: z.ZodType<unknown>;
+}
+
+export interface ActionState {
+	error?: string;
+	validationError?: string;
+}
+
+export interface ActionValidationResult {
+	isValid: boolean;
+	error?: string;
+	params?: Record<string, unknown>;
+}
+
+export interface ActionOptions {
+	paramModel?: z.ZodType<unknown>;
+	requiresBrowser?: boolean;
+}
+
+export type ActionFunction = (
+	params: Record<string, unknown>,
+	browser: BrowserContext
+) => Promise<ActionResult>;
+
+export interface ActionRegistration {
+	name: string;
+	handler: ActionFunction;
+	options?: ActionOptions;
+}
+
+export interface ActionHandler {
+	handle(params: Record<string, unknown>): Promise<ActionResult>;
+	validate(params: Record<string, unknown>): Promise<ActionValidationResult>;
 }
 
 /**
@@ -31,24 +68,37 @@ export const ActionResultSchema = z.object({
 }).strict();
 
 /**
- * Base telemetry event
+ * Specific action types
+ */
+export interface OpenTabAction {
+	type: 'open_tab';
+	url: string;
+}
+
+export interface ExtractPageContentAction {
+	type: 'extract_page_content';
+	selector?: string;
+}
+
+export interface ScrollAction {
+	type: 'scroll';
+	direction: 'up' | 'down';
+	amount?: number;
+}
+
+/**
+ * Telemetry types
  */
 export interface TelemetryEvent {
 	name: string;
 	properties: Record<string, unknown>;
 }
 
-/**
- * Registered function telemetry
- */
 export interface RegisteredFunction {
 	name: string;
 	params: Record<string, unknown>;
 }
 
-/**
- * Controller registered functions telemetry event
- */
 export interface ControllerRegisteredFunctionsTelemetryEvent extends TelemetryEvent {
 	properties: {
 		registeredFunctions: RegisteredFunction[];
@@ -56,9 +106,6 @@ export interface ControllerRegisteredFunctionsTelemetryEvent extends TelemetryEv
 	name: 'controller_registered_functions';
 }
 
-/**
- * Agent run telemetry event
- */
 export interface AgentRunTelemetryEvent extends TelemetryEvent {
 	properties: {
 		agentId: string;
@@ -67,9 +114,6 @@ export interface AgentRunTelemetryEvent extends TelemetryEvent {
 	name: 'agent_run';
 }
 
-/**
- * Agent step error telemetry event
- */
 export interface AgentStepErrorTelemetryEvent extends TelemetryEvent {
 	properties: {
 		agentId: string;
@@ -78,9 +122,6 @@ export interface AgentStepErrorTelemetryEvent extends TelemetryEvent {
 	name: 'agent_step_error';
 }
 
-/**
- * Agent end telemetry event
- */
 export interface AgentEndTelemetryEvent extends TelemetryEvent {
 	properties: {
 		agentId: string;
@@ -91,6 +132,3 @@ export interface AgentEndTelemetryEvent extends TelemetryEvent {
 	};
 	name: 'agent_end';
 }
-
-export { ActionError } from './errors';
-export type { ActionValidationResult, ActionContext, ActionState, ActionOptions } from './errors';

@@ -2,7 +2,6 @@
  * DOM types and interfaces
  */
 
-import type { Page, BrowserContext as PlaywrightContext } from "playwright";
 import type { HashedDomElement } from "./tree-processor";
 
 /**
@@ -18,6 +17,26 @@ export interface DOMBaseNode {
 	 * Parent element
 	 */
 	parent: DOMElementNode | null;
+
+	/**
+	 * Element ID
+	 */
+	id?: string;
+
+	/**
+	 * Element hash
+	 */
+	hash?: {
+		/**
+		 * Branch path hash
+		 */
+		branchPathHash: string;
+
+		/**
+		 * Element hash
+		 */
+		elementHash: string;
+	};
 }
 
 /**
@@ -57,7 +76,7 @@ export interface DOMElementNode extends DOMBaseNode {
 	/**
 	 * Child elements
 	 */
-	children: Array<DOMBaseNode>;
+	children: DOMBaseNode[];
 
 	/**
 	 * Whether the element is interactive
@@ -93,6 +112,21 @@ export interface DOMElementNode extends DOMBaseNode {
 	 * Element hash
 	 */
 	hash?: HashedDomElement;
+
+	/**
+	 * Whether the element is clickable
+	 */
+	isClickable: boolean;
+
+	/**
+	 * Whether the element is visible
+	 */
+	isVisible: boolean;
+
+	/**
+	 * Whether the element is an iframe
+	 */
+	isIframe?: boolean;
 }
 
 /**
@@ -117,7 +151,7 @@ export interface DOMHistoryElement {
 	/**
 	 * Parent branch path
 	 */
-	entireParentBranchPath: string[];
+	entireParentBranchPath: string;
 
 	/**
 	 * Element attributes
@@ -142,12 +176,7 @@ export interface DOMState {
 	/**
 	 * Element tree
 	 */
-	elementTree: DOMElementNode;
-
-	/**
-	 * Clickable elements
-	 */
-	clickableElements: DOMElementNode[];
+	elementTree: DOMElementNode[];
 
 	/**
 	 * Selector map
@@ -160,24 +189,24 @@ export interface DOMState {
  */
 export interface DOMQueryOptions {
 	/**
-	 * Whether to wait for element to be visible
+	 * Maximum results
 	 */
-	waitForVisible?: boolean;
+	maxResults?: number;
 
 	/**
-	 * Whether to wait for element to be enabled
+	 * Whether to include invisible elements
 	 */
-	waitForEnabled?: boolean;
+	includeInvisible?: boolean;
 
 	/**
-	 * Query timeout in milliseconds
+	 * Whether to perform exact match
 	 */
-	timeout?: number;
+	exactMatch?: boolean;
 
 	/**
-	 * Whether to include hidden elements
+	 * Whether to perform case-sensitive search
 	 */
-	includeHidden?: boolean;
+	caseSensitive?: boolean;
 }
 
 /**
@@ -185,22 +214,14 @@ export interface DOMQueryOptions {
  */
 export interface ElementSelector {
 	/**
-	 * Element index
+	 * Selector type
 	 */
-	index?: number;
+	type: 'xpath' | 'css';
 
 	/**
-	 * Element XPath
+	 * Selector value
 	 */
-	xpath?: string;
-
-	/**
-	 * Element coordinates
-	 */
-	coordinates?: {
-		x: number;
-		y: number;
-	};
+	value: string;
 }
 
 /**
@@ -215,12 +236,7 @@ export interface DOMObservation {
 	/**
 	 * DOM tree
 	 */
-	tree: DOMElementNode;
-
-	/**
-	 * Clickable elements
-	 */
-	clickableElements: DOMElementNode[];
+	tree: DOMElementNode[];
 
 	/**
 	 * Selector map

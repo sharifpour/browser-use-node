@@ -12,9 +12,8 @@ export {
 } from "./agent";
 
 export type {
-	AgentRunConfig,
-	AgentStatus,
 	AgentConfig,
+	AgentStatus,
 	AgentOutput,
 	AgentState,
 	AgentMessage,
@@ -27,6 +26,11 @@ export type {
 	BrowserState,
 	BrowserSession,
 	BrowserStateHistory,
+	TabInfo,
+	BrowserContextConfig,
+	PlaywrightBrowser,
+	PlaywrightBrowserContext,
+	PlaywrightPage
 } from "./browser/types";
 
 export type {
@@ -34,19 +38,25 @@ export type {
 	DOMHistoryElement,
 	DOMQueryOptions,
 	ElementSelector,
-	DOMObservation
+	DOMObservation,
+	DOMBaseNode,
+	DOMState
 } from "./dom/types";
 
 export type {
 	ActionResult,
-	SearchGoogleAction,
-	GoToUrlAction,
-	ClickElementAction,
-	InputTextAction,
-	DoneAction,
-	SwitchTabAction,
-	OpenTabAction,
-	ExtractPageContentAction,
-	ScrollAction,
-	SendKeysAction,
+	ActionFunction,
+	ActionValidationResult,
+	ActionContext,
+	ActionState,
+	ActionOptions,
+	ActionModel,
+	ActionHandler,
+	ActionRegistration
 } from "./controller/types";
+
+export { Browser } from "./browser";
+export { BrowserContext } from "./browser/context";
+export { Controller } from "./controller";
+export { DOMService } from "./dom/service";
+export { ConfigManager } from "./config/manager";

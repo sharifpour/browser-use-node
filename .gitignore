@@ -30,10 +30,10 @@ original-source
 original-source/
 original-source-NOT_IGNORED/
 original-source-NOT_IGNORED/*
- 
+
 dist/
 dist/*
 dist
 
-original-source-NOT_IGNORED/
-original-source-NOT_IGNORED/*
+# original-source-NOT_IGNORED/
+# original-source-NOT_IGNORED/*

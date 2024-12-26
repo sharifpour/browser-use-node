@@ -128,7 +128,7 @@ export class MessageManager {
 	}
 
 	cutMessages(): void {
-		const diff = this.history.totalTokens - this.maxInputTokens;
+		let diff = this.history.totalTokens - this.maxInputTokens;
 		if (diff <= 0) {
 			return;
 		}

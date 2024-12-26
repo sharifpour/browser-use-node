@@ -1,5 +1,5 @@
 import { Browser } from '../../src/browser/browser';
-import { BrowserContext } from '../../src/browser/context';
+import type { BrowserContext } from '../../src/browser/context';
 import { Controller } from '../../src/controller/controller';
 import { beforeEach, describe, expect, it } from '@jest/globals';
 

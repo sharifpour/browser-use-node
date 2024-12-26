@@ -1,0 +1,28 @@
+{
+  "browser": {
+    "headless": false,
+    "disableSecurity": false,
+    "cookiesFile": "./data/cookies.json",
+    "tracePath": "./data/traces"
+  },
+  "context": {
+    "minimumWaitPageLoadTime": 500,
+    "waitForNetworkIdlePageLoadTime": 1000,
+    "maximumWaitPageLoadTime": 30000,
+    "waitBetweenActions": 100,
+    "disableSecurity": false,
+    "browserWindowSize": {
+      "width": 1920,
+      "height": 1080
+    },
+    "noViewport": false,
+    "saveRecordingPath": "./data/recordings",
+    "tracePath": "./data/traces",
+    "saveScreenshots": true
+  },
+  "logging": {
+    "level": "info",
+    "file": "./logs/browser-use.log",
+    "console": true
+  }
+}
