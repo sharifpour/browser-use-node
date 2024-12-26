@@ -2,246 +2,121 @@
  * Browser context with enhanced capabilities.
  */
 
-import type { Locator, Page, BrowserContext as PlaywrightContext } from "playwright";
+import type { Page, BrowserContext as PlaywrightContext, ElementHandle, FrameLocator, Cookie, Request, Route, Response, ConsoleMessage, Dialog, FileChooser, WebSocket, Worker } from "playwright";
 import type { Browser } from "./browser";
-import type { BrowserSession, BrowserState, DOMElement } from "./types";
-import { writeFile } from 'node:fs/promises';
-import { createGif } from '../utils/gif';
+import type { BrowserSession, BrowserState, BrowserStateHistory, TabInfo } from "./types";
+import type { DOMElementNode } from "../dom/types";
+import type { BrowserContextConfig } from "./config";
+import { DOMService } from "../dom/service";
+import { writeFile } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+import { v4 as uuidv4 } from 'uuid';
 
-interface ElementLocation {
-	x: number;
-	y: number;
-	width: number;
-	height: number;
-}
-
-type AriaRole =
-	| "button"
-	| "link"
-	| "menuitem"
-	| "menuitemcheckbox"
-	| "menuitemradio"
-	| "option"
-	| "radio"
-	| "switch"
-	| "tab"
-	| "treeitem";
-
-/**
- * Browser context configuration
- */
-export interface BrowserContextConfig {
-	/**
-	 * Path to cookies file for persistence
-	 */
-	cookiesFile?: string;
-
-	/**
-	 * Minimum time to wait before getting page state for LLM input
-	 * @default 1.0
-	 */
-	minimumWaitPageLoadTime?: number;
-
-	/**
-	 * Time to wait for network requests to finish before getting page state
-	 * @default 3.0
-	 */
-	waitForNetworkIdlePageLoadTime?: number;
-
-	/**
-	 * Maximum time to wait for page load before proceeding anyway
-	 * @default 10.0
-	 */
-	maximumWaitPageLoadTime?: number;
-
-	/**
-	 * Time to wait between multiple per step actions
-	 * @default 1.0
-	 */
-	waitBetweenActions?: number;
-
-	/**
-	 * Disable browser security features
-	 * @default false
-	 */
-	disableSecurity?: boolean;
-
-	/**
-	 * Default browser window size
-	 */
-	browserWindowSize?: {
-		width: number;
-		height: number;
-	};
-
-	/**
-	 * Disable viewport
-	 * @default false
-	 */
-	noViewport?: boolean;
-
-	/**
-	 * Path to save video recordings
-	 */
-	saveRecordingPath?: string;
-
-	/**
-	 * Path to save trace files
-	 */
-	tracePath?: string;
-
-	/**
-	 * Whether to enable JavaScript
-	 * @default true
-	 */
-	javascript?: boolean;
-
-	/**
-	 * Whether to enable images
-	 * @default true
-	 */
-	images?: boolean;
-
-	/**
-	 * User agent string
-	 */
-	userAgent?: string;
-
-	/**
-	 * Viewport size
-	 */
-	viewport?: {
-		width: number;
-		height: number;
-	};
-
-	/**
-	 * Device scale factor
-	 */
-	deviceScaleFactor?: number;
-
-	/**
-	 * Whether the meta viewport tag is taken into account
-	 */
-	isMobile?: boolean;
-
-	/**
-	 * Whether to emulate touch events
-	 */
-	hasTouch?: boolean;
-
-	/**
-	 * Browser locale
-	 */
-	locale?: string;
-
-	/**
-	 * Browser timezone
-	 */
-	timezoneId?: string;
-
-	/**
-	 * Browser geolocation
-	 */
-	geolocation?: {
-		latitude: number;
-		longitude: number;
-		accuracy?: number;
-	};
-
-	/**
-	 * Browser permissions
-	 */
-	permissions?: string[];
-
-	/**
-	 * HTTP credentials
-	 */
-	httpCredentials?: {
-		username: string;
-		password: string;
-	};
-
-	/**
-	 * Whether to ignore HTTPS errors
-	 */
-	ignoreHttpsErrors?: boolean;
-
-	/**
-	 * Whether to enable offline mode
-	 */
-	offline?: boolean;
-
-	/**
-	 * Color scheme
-	 */
-	colorScheme?: "light" | "dark" | "no-preference";
-
-	/**
-	 * Whether to record a walkthrough GIF
-	 * @default false
-	 */
-	recordWalkthrough?: boolean;
-
-	/**
-	 * Path to save the walkthrough GIF
-	 * @default './walkthrough.gif'
-	 */
-	walkthroughPath?: string;
-
-	/**
-	 * Frame delay for walkthrough GIF (ms)
-	 * @default 1000
-	 */
-	walkthroughDelay?: number;
-}
-
-const defaultConfig: BrowserContextConfig = {
-	minimumWaitPageLoadTime: 0,           // No minimum wait
-	waitForNetworkIdlePageLoadTime: 0.1,  // Minimal network idle check
-	maximumWaitPageLoadTime: 0.2,         // Very short maximum wait
-	waitBetweenActions: 0,                // No delay between actions
-	disableSecurity: true,
+const DEFAULT_CONFIG: BrowserContextConfig = {
+	minimumWaitPageLoadTime: 0.5,
+	waitForNetworkIdlePageLoadTime: 1.0,
+	maximumWaitPageLoadTime: 5.0,
+	waitBetweenActions: 1.0,
+	disableSecurity: false,
 	browserWindowSize: {
 		width: 1280,
-		height: 1100,
+		height: 1100
 	},
-	javascript: true,
-	images: false,  // Keep images disabled for speed
+	saveScreenshots: false
+};
+
+export interface RequestInterceptor {
+	urlPattern: string | RegExp;
+	handler: (route: Route, request: Request) => Promise<void>;
+}
+
+export interface ResponseInterceptor {
+	urlPattern: string | RegExp;
+	handler: (response: Response) => Promise<void>;
+}
+
+export type PageEventType =
+	| 'console'
+	| 'dialog'
+	| 'download'
+	| 'filechooser'
+	| 'frameattached'
+	| 'framedetached'
+	| 'framenavigated'
+	| 'load'
+	| 'pageerror'
+	| 'popup'
+	| 'request'
+	| 'requestfailed'
+	| 'requestfinished'
+	| 'response'
+	| 'websocket'
+	| 'worker';
+
+export type PageEventHandler = {
+	console: (msg: ConsoleMessage) => Promise<void> | void;
+	dialog: (dialog: Dialog) => Promise<void> | void;
+	download: (download: { url: string; suggestedFilename: string }) => Promise<void> | void;
+	filechooser: (fileChooser: FileChooser) => Promise<void> | void;
+	frameattached: (frame: any) => Promise<void> | void;
+	framedetached: (frame: any) => Promise<void> | void;
+	framenavigated: (frame: any) => Promise<void> | void;
+	load: () => Promise<void> | void;
+	pageerror: (error: Error) => Promise<void> | void;
+	popup: (page: Page) => Promise<void> | void;
+	request: (request: Request) => Promise<void> | void;
+	requestfailed: (request: Request) => Promise<void> | void;
+	requestfinished: (request: Request) => Promise<void> | void;
+	response: (response: Response) => Promise<void> | void;
+	websocket: (websocket: WebSocket) => Promise<void> | void;
+	worker: (worker: Worker) => Promise<void> | void;
 };
 
 /**
  * Browser context with enhanced capabilities
  */
 export class BrowserContext {
-	private config: BrowserContextConfig;
+	private readonly contextId: string;
+	private readonly config: BrowserContextConfig;
 	private browser: Browser;
-	protected context: PlaywrightContext | null = null;
+	private context: PlaywrightContext | null = null;
 	private activePage: Page | null = null;
+	private domService: DOMService | null = null;
 	private session: BrowserSession = {
 		cachedState: {
-			selectorMap: {},
-		},
+			selectorMap: {}
+		}
 	};
-	private screenshots: Buffer[] = [];
+	private requestInterceptors: RequestInterceptor[] = [];
+	private responseInterceptors: ResponseInterceptor[] = [];
+	private eventHandlers: Partial<Record<PageEventType, PageEventHandler[keyof PageEventHandler][]>> = {};
 
 	constructor(browser: Browser, config: Partial<BrowserContextConfig> = {}) {
+		this.contextId = uuidv4();
 		this.config = {
-			...defaultConfig,
-			recordWalkthrough: false,
-			walkthroughPath: './walkthrough.gif',
-			walkthroughDelay: 1000,
+			...DEFAULT_CONFIG,
 			...config
 		};
 		this.browser = browser;
+	}
 
-		// Set longer default timeouts
-		if (this.context) {
-			this.context.setDefaultNavigationTimeout(10000);  // 10 seconds
-			this.context.setDefaultTimeout(5000);            // 5 seconds
+	/**
+	 * Get all pages in the context
+	 */
+	public get pages(): Array<[number, Page]> {
+		return this.context?.pages().map((page, index) => [index, page]) || [];
+	}
+
+	/**
+	 * Get the DOM service
+	 */
+	private async getDOMService(): Promise<DOMService> {
+		if (!this.domService) {
+			const page = await this.getPage();
+			this.domService = new DOMService(page);
 		}
-
-		void this.init();
+		return this.domService;
 	}
 
 	/**
@@ -252,33 +127,17 @@ export class BrowserContext {
 
 		const playwrightBrowser = await this.browser.getPlaywrightBrowser();
 
-		// Create context with minimal settings
+		// Create context with configuration
 		this.context = await playwrightBrowser.newContext({
-			viewport: this.config.viewport || this.config.browserWindowSize,
-			userAgent: this.config.userAgent,
-			deviceScaleFactor: this.config.deviceScaleFactor,
-			isMobile: this.config.isMobile,
-			hasTouch: this.config.hasTouch,
-			javaScriptEnabled: this.config.javascript,
-			bypassCSP: true,
-			ignoreHTTPSErrors: this.config.ignoreHttpsErrors,
-			locale: this.config.locale,
-			timezoneId: this.config.timezoneId,
-			geolocation: this.config.geolocation,
-				permissions: this.config.permissions,
-				httpCredentials: this.config.httpCredentials,
-				offline: this.config.offline,
-				colorScheme: this.config.colorScheme,
-				// Speed up context creation
-				serviceWorkers: 'block',
+			viewport: this.config.noViewport ? null : this.config.browserWindowSize,
+			recordVideo: this.config.saveRecordingPath ? {
+				dir: this.config.saveRecordingPath
+			} : undefined,
+			ignoreHTTPSErrors: this.config.disableSecurity,
+			userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36',
+			javaScriptEnabled: true,
+			bypassCSP: this.config.disableSecurity
 		});
-
-		// Configure route handler for images if needed
-		if (!this.config.images) {
-			await this.context.route("**/*.{png,jpg,jpeg,gif,webp}", (route) =>
-				route.abort(),
-			);
-		}
 
 		// Add anti-detection scripts
 		await this.context.addInitScript(`
@@ -309,37 +168,58 @@ export class BrowserContext {
 			);
 		`);
 
-		// Optimize context after creation
-		await this.optimizeContext();
+		// Load cookies if file exists
+		if (this.config.cookiesFile) {
+			try {
+				const fs = await import("node:fs/promises");
+				const cookies = JSON.parse(
+					await fs.readFile(this.config.cookiesFile, "utf-8")
+				);
+				await this.context.addCookies(cookies);
+			} catch (error) {
+				console.warn("Failed to load cookies:", error);
+			}
+		}
 
-		// Capture initial frame if recording enabled
-		if (this.config.recordWalkthrough) {
-			const page = await this.getPage();
-			await page.waitForTimeout(500);
-			await this.captureFrame();
+		// Start tracing if path provided
+		if (this.config.tracePath) {
+			await this.context.tracing.start({
+				screenshots: true,
+				snapshots: true,
+				sources: true
+			});
 		}
 	}
 
-	private async optimizeContext(): Promise<void> {
-		if (!this.context) return;
+	/**
+	 * Click on an element node
+	 */
+	public async clickElementNode(elementNode: DOMElementNode): Promise<void> {
+		const page = await this.getPage();
+		const element = await page.locator(elementNode.xpath);
+		await element.click();
+	}
 
-		// Set aggressive timeouts
-		this.context.setDefaultNavigationTimeout(2000);  // 2 seconds max
-		this.context.setDefaultTimeout(1000);           // 1 second max
+	/**
+	 * Input text into an element node
+	 */
+	public async inputTextElementNode(elementNode: DOMElementNode, text: string): Promise<void> {
+		const page = await this.getPage();
+		const element = await page.locator(elementNode.xpath);
+		await element.fill(text);
+	}
 
-		// Block all unnecessary resources immediately and in parallel
-		await Promise.all([
-			this.context.route('**/*.{png,jpg,jpeg,gif,svg,ico,css,scss,less}', route => route.abort()),
-			this.context.route('**/*.{woff,woff2,ttf,otf,eot}', route => route.abort()),
-			this.context.route('**/analytics.js', route => route.abort()),
-			this.context.route('**/gtag.js', route => route.abort()),
-			this.context.route('**/ga.js', route => route.abort()),
-			this.context.route('**/adsbygoogle.js', route => route.abort()),
-			// Add more resource blocking in parallel
-			this.context.route('**/*metrics*', route => route.abort()),
-			this.context.route('**/*tracking*', route => route.abort()),
-			this.context.route('**/*telemetry*', route => route.abort()),
-		]);
+	/**
+	 * Remove highlights from the page
+	 */
+	public async removeHighlights(): Promise<void> {
+		const page = await this.getPage();
+		await page.evaluate(() => {
+			const highlights = document.querySelectorAll('.highlight-element');
+			for (const el of Array.from(highlights)) {
+				el.remove();
+			}
+		});
 	}
 
 	/**
@@ -352,9 +232,6 @@ export class BrowserContext {
 
 		if (!this.activePage) {
 			this.activePage = await this.context.newPage();
-			// Set aggressive page-level timeouts
-			await this.activePage.setDefaultTimeout(1000);
-			await this.activePage.setDefaultNavigationTimeout(2000);
 		}
 
 		return this.activePage;
@@ -364,377 +241,83 @@ export class BrowserContext {
 	 * Close the browser context
 	 */
 	async close(): Promise<void> {
+		console.debug('Closing browser context');
+
 		try {
-			// Save walkthrough with timeout
-			await Promise.race([
-				this.saveWalkthrough(),
-				new Promise((_, reject) =>
-					setTimeout(() => reject(new Error('Walkthrough save timed out')), 120000)
-				)
-			]);
-		} catch (error) {
-			console.warn('Error during walkthrough save:', error);
-		} finally {
-			// Always clean up
-			this.screenshots = [];
-			if (this.context) {
-				await this.context.close();
-				this.context = null;
-				this.activePage = null;
+			// Check if already closed
+			if (!this.context) {
+				return;
 			}
-		}
-	}
 
-	/**
-	 * Input text into an element
-	 */
-	async inputText(elementNode: DOMElement, text: string): Promise<void> {
-		const page = await this.getPage();
+			// Save cookies if file specified
+			if (this.config.cookiesFile) {
+				await this.saveCookies();
+			}
 
-		try {
-			await this.captureFrame(); // Before
-			await this.doInputText(elementNode, text);
-			await page.waitForTimeout(500); // Wait for visual changes
-			await this.captureFrame(); // After
-		} catch (error) {
-			console.warn('Failed to capture input text frames:', error);
-			throw error;
-		}
-	}
-
-	/**
-	 * Click an element
-	 */
-	async clickElement(elementNode: DOMElement): Promise<void> {
-		const page = await this.getPage();
-
-		try {
-			await this.captureFrame(); // Before
-			await this.doClickElement(elementNode);
-			await page.waitForTimeout(500); // Wait for visual changes
-			await this.captureFrame(); // After
-		} catch (error) {
-			console.warn('Failed to capture click frames:', error);
-			throw error;
-		}
-	}
-
-	/**
-	 * Locate an element on the page
-	 */
-	private async locateElement(elementNode: DOMElement): Promise<Locator | null> {
-		const page = await this.getPage();
-
-		const strategies = [
-			async (): Promise<Locator | null> => {
-				const text = elementNode.attributes?.text || '';
-				return text ? page.getByText(text, { exact: true }) : null;
-			},
-			async (): Promise<Locator | null> => {
-				const role = elementNode.attributes?.role as AriaRole || 'button';
-				const text = elementNode.attributes?.text || '';
-				return text ? page.getByRole(role, { name: text }) : null;
-			},
-			async (): Promise<Locator | null> => {
-				const tag = elementNode.tag || '';
-				const placeholder = elementNode.attributes?.placeholder || '';
-				return placeholder ? page.locator(`${tag}[placeholder="${placeholder}"]`) : null;
-			},
-			async (): Promise<Locator | null> => {
-				const locationStr = elementNode.attributes?.location;
-				if (!locationStr) return null;
-
+			// Stop tracing if enabled
+			if (this.config.tracePath) {
 				try {
-					// First convert to unknown, then to ElementLocation
-					const parsed = JSON.parse(locationStr as string) as unknown;
-					const location = parsed as ElementLocation;
-
-					// Validate the location object
-					if (
-						typeof location === 'object' &&
-						location !== null &&
-						typeof location.x === 'number' &&
-						typeof location.y === 'number' &&
-						typeof location.width === 'number' &&
-						typeof location.height === 'number'
-					) {
-						return page.locator(`*:near(:root, ${location.x}, ${location.y})`);
-					}
-				} catch {
-					// Invalid location format
-				}
-				return null;
-			}
-		];
-
-		for (const strategy of strategies) {
-			try {
-				const element = await strategy();
-				if (element && await element.count() > 0) {
-					return element;
-				}
-			} catch {
-				// Failed strategy, try next one
-			}
-		}
-
-		return null;
-	}
-
-	/**
-	 * Navigate forward in history
-	 */
-	async goForward(): Promise<void> {
-		const page = await this.getPage();
-		await page.goForward();
-		await page.waitForLoadState();
-	}
-
-	/**
-	 * Close the current tab
-	 */
-	async closeCurrentTab(): Promise<void> {
-		const page = await this.getPage();
-		await page.close();
-
-		// Switch to the first available tab if any exist
-		if (this.context?.pages().length) {
-			await this.switchToTab(0);
-		}
-	}
-
-	/**
-	 * Get the current page HTML content
-	 */
-	async getPageHtml(): Promise<string> {
-		const page = await this.getPage();
-		return page.content();
-	}
-
-	/**
-	 * Execute JavaScript code on the page
-	 */
-	async executeJavaScript<T>(script: string): Promise<T> {
-		const page = await this.getPage();
-		return page.evaluate(script);
-	}
-
-	/**
-	 * Get the current state of the browser
-	 */
-	async getState(useVision = false): Promise<BrowserState> {
-		await this.waitForPageAndFramesLoad();
-		const state = await this.updateState(useVision);
-
-		// Save cookies if a file is specified
-		if (this.config.cookiesFile) {
-			await this.saveCookies();
-		}
-
-		return state;
-	}
-
-	/**
-	 * Take a screenshot of the current page
-	 */
-	async takeScreenshot(fullPage = false): Promise<string> {
-		const page = await this.getPage();
-
-		const screenshot = await page.screenshot({
-			fullPage,
-			animations: "disabled",
-		});
-
-		return Buffer.from(screenshot).toString("base64");
-	}
-
-	/**
-	 * Remove highlight overlays and labels
-	 */
-	async removeHighlights(): Promise<void> {
-		try {
-			const page = await this.getPage();
-			await page.evaluate(`
-				try {
-					// Remove the highlight container and all its contents
-					const container = document.getElementById('playwright-highlight-container');
-					if (container) {
-						container.remove();
-					}
-
-					// Remove highlight attributes from elements
-					const highlightedElements = document.querySelectorAll('[browser-user-highlight-id^="playwright-highlight-"]');
-					highlightedElements.forEach(el => {
-						el.removeAttribute('browser-user-highlight-id');
+					await this.context.tracing.stop({
+						path: path.join(this.config.tracePath, `${this.contextId}.zip`)
 					});
-				} catch (e) {
-					console.error('Failed to remove highlights:', e);
+				} catch (error) {
+					console.debug(`Failed to stop tracing: ${error}`);
 				}
-			`);
-		} catch (error) {
-			// Don't throw error since this is not critical functionality
-			console.debug("Failed to remove highlights (this is usually ok):", error);
+			}
+
+			// Clear all event listeners
+			await this.clearAllEventListeners();
+
+			// Remove DOM highlights
+			await this.removeHighlights();
+
+			// Close all pages
+			for (const [_, page] of this.pages) {
+				try {
+					await page.close();
+				} catch (error) {
+					console.debug(`Failed to close page: ${error}`);
+				}
+			}
+
+			// Close context
+			try {
+				await this.context.close();
+			} catch (error) {
+				console.debug(`Failed to close context: ${error}`);
+			}
+		} finally {
+			// Clear references
+			this.context = null;
+			this.activePage = null;
+			this.domService = null;
+			this.session = {
+				cachedState: {
+					selectorMap: {}
+				}
+			};
+			this.requestInterceptors = [];
+			this.responseInterceptors = [];
+			this.eventHandlers = {};
 		}
 	}
 
 	/**
 	 * Save current cookies to file
 	 */
-	async saveCookies(): Promise<void> {
-		if (this.context && this.config.cookiesFile) {
-			try {
-				const cookies = await this.context.cookies();
-				console.info(
-					`Saving ${cookies.length} cookies to ${this.config.cookiesFile}`,
-				);
-
-				const fs = await import("node:fs/promises");
-				const path = await import("node:path");
-
-				// Create directory if it doesn't exist
-				const dirname = path.dirname(this.config.cookiesFile);
-				if (dirname) {
-					await fs.mkdir(dirname, { recursive: true });
-				}
-
-				await fs.writeFile(this.config.cookiesFile, JSON.stringify(cookies));
-			} catch (error) {
-				console.warn("Failed to save cookies:", error);
-			}
-		}
-	}
-
-	/**
-	 * Check if element is a file uploader
-	 */
-	public async isFileUploader(elementNode: DOMElement): Promise<boolean> {
-		if (elementNode.tag === 'input') {
-			return elementNode.attributes.type === 'file' ||
-				elementNode.attributes.accept !== undefined;
-		}
-
-		// Check children recursively
-		if (elementNode.children) {
-			for (const child of elementNode.children) {
-				if (await this.isFileUploader(child)) {
-					return true;
-				}
-			}
-		}
-
-		return false;
-	}
-
-	/**
-	 * Wait for page and frames to load
-	 */
-	private async waitForPageAndFramesLoad(): Promise<void> {
-		const page = await this.getPage();
+	private async saveCookies(): Promise<void> {
+		if (!this.context || !this.config.cookiesFile) return;
 
 		try {
-			// Wait only for essential events in parallel
-			await Promise.all([
-				page.waitForLoadState('domcontentloaded'),
-				page.waitForLoadState('networkidle', {
-					timeout: 100
-				}).catch(() => {})
-			]);
-
-			// Capture frame after navigation if recording enabled
-			if (this.config.recordWalkthrough) {
-				await page.waitForTimeout(500); // Wait for visual stability
-				await this.captureFrame();
-			}
+			const cookies = await this.context.cookies();
+			await mkdir(dirname(this.config.cookiesFile), { recursive: true });
+			await writeFile(
+				this.config.cookiesFile,
+				JSON.stringify(cookies, null, 2)
+			);
 		} catch (error) {
-			console.debug("Load state warning:", error.message);
+			console.warn("Failed to save cookies:", error);
 		}
-	}
-
-	/**
-	 * Update and return state
-	 */
-	private async updateState(useVision = false): Promise<BrowserState> {
-		const page = await this.getPage();
-
-		try {
-			await this.removeHighlights();
-
-			// Run all content extraction in parallel
-			const [url, title, content, screenshot] = await Promise.all([
-				page.url(),
-				page.title(),
-				// Extract clickable elements and text content in parallel
-				page.evaluate(() => {
-					const clickableElements = Array.from(document.querySelectorAll('a, button, input, select, [role="button"], [role="link"]'))
-						.map(el => {
-							const rect = el.getBoundingClientRect();
-							return {
-								tag: el.tagName.toLowerCase(),
-								text: el.textContent?.trim() || '',
-								type: (el as HTMLInputElement).type || '',
-								href: (el as HTMLAnchorElement).href || '',
-								value: (el as HTMLInputElement).value || '',
-								placeholder: (el as HTMLInputElement).placeholder || '',
-								isVisible: rect.width > 0 && rect.height > 0,
-								location: {
-									x: rect.x,
-									y: rect.y,
-									width: rect.width,
-									height: rect.height
-								}
-							};
-						})
-						.filter(el => el.isVisible);
-
-					// Get main content text
-					const mainContent = document.body.innerText
-						.split('\n')
-						.map(line => line.trim())
-						.filter(line => line.length > 0)
-						.join('\n');
-
-					return {
-						clickableElements,
-						mainContent,
-						headings: Array.from(document.querySelectorAll('h1, h2, h3'))
-							.map(h => h.textContent?.trim())
-							.filter(Boolean)
-					};
-				}),
-				// Take screenshot if vision is enabled
-				useVision ? this.takeScreenshot() : Promise.resolve(undefined)
-			]);
-
-			return {
-				url,
-				title,
-				content: JSON.stringify({
-					clickableElements: content.clickableElements,
-					mainContent: content.mainContent,
-					headings: content.headings
-				}),
-				screenshot
-			};
-		} catch (error) {
-			console.error("Failed to update state:", error);
-			// Fallback to basic content extraction
-			return {
-				url: page.url(),
-				title: await page.title(),
-				content: await page.evaluate(() => document.body.innerText),
-				screenshot: useVision ? await this.takeScreenshot() : undefined
-			};
-		}
-	}
-
-	/**
-	 * Get all pages in the context
-	 */
-	async getPages(): Promise<Page[]> {
-		if (!this.context) {
-			throw new Error("Browser context not initialized");
-		}
-		return this.context.pages();
 	}
 
 	/**
@@ -745,17 +328,126 @@ export class BrowserContext {
 	}
 
 	/**
+	 * Get the current state of the browser
+	 */
+	async getState(): Promise<BrowserState> {
+		const domService = await this.getDOMService();
+		const state = await domService.getState();
+		const [url, title] = await Promise.all([
+			this.activePage.url(),
+			this.activePage.title()
+		]);
+
+		const tabs = await this.getTabs();
+		const screenshot = await this.getScreenshot();
+
+		return {
+			url,
+			title,
+			tabs,
+			domTree: state.elementTree,
+			clickableElements: state.elementTree.children.filter(child =>
+				'isInteractive' in child && child.isInteractive
+			) as DOMElementNode[],
+			selectorMap: state.selectorMap,
+			screenshot
+		};
+	}
+
+	/**
+	 * Get the browser state history
+	 */
+	async getStateHistory(): Promise<BrowserStateHistory> {
+		if (!this.activePage) {
+			throw new Error("No active page");
+		}
+
+		const [url, title] = await Promise.all([
+			this.activePage.url(),
+			this.activePage.title()
+		]);
+
+		const tabs = await this.getTabs();
+		const screenshot = await this.getScreenshot();
+
+		return {
+			url,
+			title,
+			tabs,
+			interactedElement: null,
+			screenshot,
+			toDict: () => ({
+				url,
+				title,
+				tabs,
+				interacted_element: null,
+				screenshot
+			})
+		};
+	}
+
+	/**
+	 * Get the config
+	 */
+	public getConfig(): BrowserContextConfig {
+		return this.config;
+	}
+
+	private async getTabs(): Promise<TabInfo[]> {
+		const tabs: TabInfo[] = [];
+		for (const [id, page] of this.pages) {
+			tabs.push({
+				url: page.url(),
+				title: await page.title(),
+				pageId: id
+			});
+		}
+		return tabs;
+	}
+
+	private async getScreenshot(): Promise<string | undefined> {
+		if (!this.activePage || !this.config.saveScreenshots) {
+			return undefined;
+		}
+
+		const buffer = await this.activePage.screenshot({ type: 'png' });
+		return buffer.toString('base64');
+	}
+
+	/**
+	 * Wait for page to load
+	 */
+	private async waitForPageLoad(): Promise<void> {
+		const page = await this.getPage();
+
+		// Wait minimum time
+		await page.waitForTimeout(this.config.minimumWaitPageLoadTime * 1000);
+
+		try {
+			// Wait for network idle
+			await page.waitForLoadState("networkidle", {
+				timeout: this.config.waitForNetworkIdlePageLoadTime * 1000
+			});
+		} catch {
+			// Ignore timeout
+		}
+
+		// Wait between actions
+		await page.waitForTimeout(this.config.waitBetweenActions * 1000);
+	}
+
+	/**
 	 * Switch to a specific tab
 	 */
-	async switchToTab(tabIndex: number): Promise<void> {
-		const pages = this.context.pages();
-		const adjustedIndex = tabIndex < 0 ? pages.length + tabIndex : tabIndex;
+	async switchToTab(index: number): Promise<void> {
+		if (!this.context) throw new Error("Browser context not initialized");
 
-		if (adjustedIndex >= 0 && adjustedIndex < pages.length) {
-			this.activePage = pages[adjustedIndex];
+		const pages = this.context.pages();
+		if (index >= 0 && index < pages.length) {
+			this.activePage = pages[index];
 			await this.activePage.bringToFront();
 		} else {
-			throw new Error(`Invalid tab index: ${tabIndex}`);
+			throw new Error(`Invalid tab index: ${index}`);
 		}
 	}
 
@@ -763,200 +455,1167 @@ export class BrowserContext {
 	 * Create a new tab
 	 */
 	async createNewTab(url?: string): Promise<void> {
-		if (!this.context) {
-			throw new Error("Browser context not initialized");
-		}
+		if (!this.context) throw new Error("Browser context not initialized");
 
 		this.activePage = await this.context.newPage();
 		if (url) {
-			// Navigate and don't wait for full load
-			await Promise.all([
-				this.activePage.goto(url, {
-					waitUntil: 'domcontentloaded',
-					timeout: 2000
-				}),
-				this.activePage.waitForLoadState('networkidle', {
-					timeout: 100
-				}).catch(() => {})
-			]);
+			await this.activePage.goto(url);
+			await this.waitForPageLoad();
 		}
 	}
 
 	/**
-	 * Capture frame
+	 * Check if element is a file uploader
 	 */
-	private async captureFrame(): Promise<void> {
-		if (!this.config.recordWalkthrough) return;
+	async isFileUploader(elementNode: DOMElementNode): Promise<boolean> {
+		return elementNode.tagName.toLowerCase() === "input" &&
+			(elementNode.attributes.type === "file" ||
+				elementNode.attributes.accept !== undefined);
+	}
+
+	/**
+	 * Navigate forward in history
+	 */
+	public async goForward(): Promise<void> {
+		const page = await this.getPage();
+
+		// Navigate forward
+		await page.goForward();
+
+		// Wait for minimum load time
+		await page.waitForTimeout(this.config.minimumWaitPageLoadTime * 1000);
 
 		try {
-			const page = await this.getPage();
-
-			// Wait for any animations to settle
-			await page.waitForTimeout(100);
-
-			console.log('Capturing frame...');
-			const screenshot = await page.screenshot({
-				type: 'png',
-				fullPage: false,
-				animations: 'disabled',
-				timeout: 5000
+			// Wait for network idle
+			await page.waitForLoadState("networkidle", {
+				timeout: this.config.waitForNetworkIdlePageLoadTime * 1000
 			});
-
-			this.screenshots.push(screenshot);
-			console.log(`Screenshot captured (total: ${this.screenshots.length})`);
 		} catch (error) {
-			console.warn('Failed to capture frame:', error);
+			console.warn('Network idle timeout reached:', error);
+		}
+
+		// Wait for all frames to load
+		const frames = page.frames();
+		await Promise.all(
+			frames.map(frame =>
+				frame.waitForLoadState('load')
+					.catch(error => console.warn(`Frame load error: ${error}`))
+			)
+		);
+
+		// Wait between actions
+		await page.waitForTimeout(this.config.waitBetweenActions * 1000);
+	}
+
+	/**
+	 * Close the current tab
+	 */
+	public async closeCurrentTab(): Promise<void> {
+		const context = await this.getContext();
+		if (!context) throw new Error('Browser context not initialized');
+
+		const page = await this.getPage();
+
+		// Get all pages before closing
+		const pages = context.pages();
+		const currentIndex = pages.indexOf(page);
+
+		// Close the current page
+		await page.close();
+
+		// Update active page
+		if (pages.length > 1) {
+			// Switch to the next tab if available, otherwise previous
+			const newIndex = currentIndex < pages.length - 1 ? currentIndex : currentIndex - 1;
+			this.activePage = pages[newIndex];
+			await this.activePage.bringToFront();
+		} else {
+			// If this was the last tab, create a new blank tab
+			this.activePage = await context.newPage();
+		}
+
+		// Clear any cached state
+		this.session = {
+			...this.session!,
+			cachedState: {
+				selectorMap: {}
+			}
+		};
+	}
+
+	/**
+	 * Get the current page HTML content with error handling
+	 */
+	public async getPageHtml(options: {
+		timeout?: number;
+		waitUntil?: 'load' | 'domcontentloaded' | 'networkidle';
+	} = {}): Promise<string> {
+		const page = await this.getPage();
+		const { timeout = 30000, waitUntil = 'networkidle' } = options;
+
+		try {
+			// Wait for page to be in desired state
+			await page.waitForLoadState(waitUntil, { timeout });
+
+			// Get the HTML content
+			const content = await page.content();
+			if (!content) {
+				throw new Error('Failed to get page content: Empty response');
+			}
+
+			return content;
+		} catch (error) {
+			if (error instanceof Error) {
+				if (error.message.includes('timeout')) {
+					throw new Error(`Timeout (${timeout}ms) reached while waiting for page content`);
+				}
+				throw new Error(`Failed to get page content: ${error.message}`);
+			}
+			throw error;
 		}
 	}
 
 	/**
-	 * Save walkthrough
+	 * Execute JavaScript code on the page with proper error handling and timeout
 	 */
-	async saveWalkthrough(): Promise<void> {
-		// Early return if no screenshots
-		if (!this.config.recordWalkthrough || this.screenshots.length === 0) {
-			console.log('No screenshots to process - skipping walkthrough creation');
-			return;
-		}
+	public async executeJavaScript<T>(
+		script: string,
+		options: {
+			timeout?: number;
+			args?: any[];
+			returnByValue?: boolean;
+		} = {}
+	): Promise<T> {
+		const page = await this.getPage();
+		const { timeout = 30000, args = [], returnByValue = true } = options;
 
 		try {
-			console.log(`Creating GIF from ${this.screenshots.length} screenshots...`);
-
-			// Create GIF with timeout
-			const gifPromise = createGif(this.screenshots, {
-				delay: this.config.walkthroughDelay,
-				quality: 10,
-				repeat: 0,
-				timeout: 60000 // 1 minute timeout
+			// Create a promise that will reject after timeout
+			const timeoutPromise = new Promise<never>((_, reject) => {
+				setTimeout(() => {
+					reject(new Error(`Script execution timed out after ${timeout}ms`));
+				}, timeout);
 			});
 
-			// Add overall timeout
-			const timeoutPromise = new Promise<Buffer>((_, reject) =>
-				setTimeout(() => reject(new Error('Walkthrough save timed out')), 120000)
+			// Create the evaluation promise
+			const evaluationPromise = page.evaluate<T, any[]>(
+				(script, ...args) => {
+					try {
+						// Use Function constructor to create a function from the script
+						const scriptFn = new Function('...args', script);
+						return scriptFn(...args);
+					} catch (error) {
+						if (error instanceof Error) {
+							throw new Error(`Script execution failed: ${error.message}`);
+						}
+						throw error;
+					}
+				},
+				script,
+				...args
 			);
 
-			// Race between GIF creation and timeout
-			const gif = await Promise.race<Buffer>([gifPromise, timeoutPromise]);
+			// Race between timeout and evaluation
+			const result = await Promise.race([evaluationPromise, timeoutPromise]);
 
-			const path = this.config.walkthroughPath;
-			console.log(`Writing GIF to ${path}...`);
-			await writeFile(path, gif);
-			console.log(`Saved walkthrough GIF to ${path}`);
+			// Validate result type if specified in generic parameter
+			if (returnByValue) {
+				try {
+					// Attempt to serialize the result to validate it
+					JSON.stringify(result);
+				} catch (error) {
+					throw new Error('Script result cannot be serialized');
+				}
+			}
 
+			return result;
 		} catch (error) {
-			console.warn('Error during walkthrough save:', error);
-		} finally {
-			// Always clean up
-			this.screenshots = [];
+			if (error instanceof Error) {
+				// Enhance error message with more context
+				if (error.message.includes('Script execution failed')) {
+					throw error;
+				}
+				throw new Error(`Failed to execute JavaScript: ${error.message}`);
+			}
+			throw error;
 		}
 	}
 
 	/**
-	 * Input text into an element
+	 * Get element by index with retry logic for stale elements
 	 */
-	private async doInputText(elementNode: DOMElement, text: string): Promise<void> {
-		try {
-			const page = await this.getPage();
-			const element = await this.locateElement(elementNode);
-
-			if (!element) {
-				throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
-			}
-
-			// Wait for element to be ready
-			await element.waitFor({ state: 'visible', timeout: 5000 });
-			await element.scrollIntoViewIfNeeded();
-
-			// Clear and type text
-			await element.click();
-			await page.keyboard.press('Control+A');
-			await page.keyboard.press('Backspace');
-			await element.type(text, { delay: 50 });
-
-			// Handle Google search
-			if (page.url().includes('google.com')) {
-				await page.keyboard.press('Enter');
-				await Promise.race([
-					page.waitForLoadState('networkidle', { timeout: 5000 }),
-					page.waitForSelector('div.g', { timeout: 5000 })
-				]).catch(() => undefined);
-			}
-		} catch (error) {
-			throw new Error(`Failed to input text: ${(error as Error).message}`);
+	public async getElementByIndex(index: number): Promise<ElementHandle | null> {
+		if (typeof index !== 'number' || index < 0) {
+			throw new Error(`Invalid element index: ${index}`);
 		}
+
+		const selectorMap = (await this.getSession()).cachedState.selectorMap;
+		if (!selectorMap[index]) {
+			throw new Error(`No element found at index: ${index}`);
+		}
+
+		// Add retry logic for stale elements
+		const maxRetries = 3;
+		let retryCount = 0;
+		let lastError: Error | null = null;
+
+		while (retryCount < maxRetries) {
+			try {
+				const element = await this.getLocateElement(selectorMap[index]);
+				if (element) {
+					// Verify element is still attached to DOM
+					await element.evaluate(node => node.isConnected)
+						.catch(() => { throw new Error('Element is detached from DOM'); });
+					return element;
+				}
+				return null;
+			} catch (error) {
+				lastError = error as Error;
+				retryCount++;
+				if (retryCount < maxRetries) {
+					await new Promise(resolve => setTimeout(resolve, 100));
+					// Refresh selector map if needed
+					const session = await this.getSession();
+					if (session.cachedState.selectorMap[index]) {
+						selectorMap[index] = session.cachedState.selectorMap[index];
+					}
+				}
+			}
+		}
+
+		throw new Error(`Failed to get element at index ${index} after ${maxRetries} retries. Last error: ${lastError?.message}`);
 	}
 
 	/**
-	 * Click an element
+	 * Get DOM element by index with validation
 	 */
-	private async doClickElement(elementNode: DOMElement): Promise<void> {
-		const page = await this.getPage();
-		const element = await this.locateElement(elementNode);
+	public async getDomElementByIndex(index: number): Promise<DOMElementNode | null> {
+		if (typeof index !== 'number' || index < 0) {
+			throw new Error(`Invalid element index: ${index}`);
+		}
+
+		const session = await this.getSession();
+		const element = session.cachedState.selectorMap[index];
 
 		if (!element) {
-			throw new Error(`Element not found: ${JSON.stringify(elementNode)}`);
+			return null;
 		}
 
 		try {
-			// Increase timeout for stability
-			await element.waitFor({
-				state: 'visible',
-				timeout: 10000  // Increase to 10 seconds
-			});
-			await element.scrollIntoViewIfNeeded({ timeout: 5000 });
+			// Validate element still exists in DOM
+			const exists = await this.page.evaluate((xpath) => {
+				const result = document.evaluate(
+					xpath,
+					document,
+					null,
+					XPathResult.FIRST_ORDERED_NODE_TYPE,
+					null
+				);
+				return !!result.singleNodeValue;
+			}, element.xpath);
 
-			// Click strategies with increased timeouts
-			const strategies = [
-				async (): Promise<void> => {
-					await element.click({
-						timeout: 5000,  // Increase click timeout
-						delay: 100,     // Add small delay before click
-						force: true     // Force click if needed
-					});
-				},
-				async (): Promise<void> => {
-					const elementHandle = await element.elementHandle();
-					if (elementHandle) {
-						await page.evaluate(`
-							(element) => {
-								try {
-									element.click();
-								} catch {
-									element.dispatchEvent(new MouseEvent('click', {
-										bubbles: true,
-										cancelable: true,
-										view: window
-									}));
-								}
-							}
-						`, elementHandle);
-					}
-				},
-				async (): Promise<void> => {
-					const box = await element.boundingBox();
-					if (box) {
-						await page.mouse.click(
-							box.x + box.width / 2,
-							box.y + box.height / 2
-						);
-					}
+			if (!exists) {
+				// Remove from selector map if element no longer exists
+				delete session.cachedState.selectorMap[index];
+				return null;
+			}
+
+			return element;
+		} catch (error) {
+			console.warn(`Error validating element at index ${index}:`, error);
+			return null;
+		}
+	}
+
+	/**
+	 * Convert simple XPath to CSS selector when possible
+	 */
+	private _convertSimpleXPathToCssSelector(xpath: string): string | null {
+		// Handle simple XPath patterns
+		const idMatch = xpath.match(/\/\/*[@id='([^']*)']$/);
+		if (idMatch) return `#${CSS.escape(idMatch[1])}`;
+
+		const classMatch = xpath.match(/\/\/*[@class='([^']*)']$/);
+		if (classMatch) return `.${classMatch[1].split(/\s+/).map(c => CSS.escape(c)).join('.')}`;
+
+		const tagMatch = xpath.match(/\/\/(\w+)$/);
+		if (tagMatch) return tagMatch[1].toLowerCase();
+
+		const attrMatch = xpath.match(/\/\/*\[@([^=]+)='([^']*)']$/);
+		if (attrMatch) return `[${CSS.escape(attrMatch[1])}="${CSS.escape(attrMatch[2])}"]`;
+
+		// Return null for complex XPath that can't be converted
+		return null;
+	}
+
+	/**
+	 * Enhanced CSS selector for element with shadow DOM support
+	 */
+	private _enhancedCssSelectorForElement(element: DOMElementNode): string {
+		try {
+			const safeAttributes = new Set([
+				'id', 'class', 'name', 'type', 'value', 'title',
+				'alt', 'role', 'data-testid', 'aria-label', 'part'
+			]);
+
+			let cssSelector = element.tagName.toLowerCase();
+			let specificity = 0;
+
+			// Add ID if present (highest specificity)
+			if (element.attributes.id) {
+				cssSelector += `#${CSS.escape(element.attributes.id)}`;
+				specificity = 100;
+				return cssSelector; // ID is unique enough
+			}
+
+			// Add classes if present
+			const classes = element.attributes.class?.split(/\s+/).filter(Boolean);
+			if (classes?.length) {
+				cssSelector += classes.map(c => `.${CSS.escape(c)}`).join('');
+				specificity += classes.length * 10;
+			}
+
+			// Add other attributes based on specificity
+			const attributeEntries = Object.entries(element.attributes)
+				.filter(([attr]) => safeAttributes.has(attr) && attr !== 'class')
+				.sort(([a], [b]) => {
+					const aPriority = ['name', 'data-testid', 'role'].includes(a) ? 1 : 0;
+					const bPriority = ['name', 'data-testid', 'role'].includes(b) ? 1 : 0;
+					return bPriority - aPriority;
+				});
+
+			for (const [attribute, value] of attributeEntries) {
+				if (!value.trim()) continue;
+
+				const safeAttribute = attribute.replace(':', '\\:');
+				if (value === '') {
+					cssSelector += `[${safeAttribute}]`;
+				} else if (/["'<>`]/.test(value)) {
+					const safeValue = value.replace(/"/g, '\\"');
+					cssSelector += `[${safeAttribute}*="${safeValue}"]`;
+				} else {
+					cssSelector += `[${safeAttribute}="${value}"]`;
 				}
-			];
+				specificity += 1;
 
-			for (const strategy of strategies) {
-				try {
-					await strategy();
-					// Wait longer for navigation/stability
-					await page.waitForTimeout(500);
-					return;
-				} catch {
-					// Failed strategy, try next one
+				// Break if we have enough specificity
+				if (specificity >= 20) break;
+			}
+
+			// Add structural selectors if needed
+			if (specificity < 10 && element.parent) {
+				const siblings = element.parent.children.filter(
+					child => child.tagName === element.tagName
+				);
+				if (siblings.length > 1) {
+					const index = siblings.indexOf(element) + 1;
+					cssSelector += `:nth-of-type(${index})`;
 				}
 			}
 
-			throw new Error('All click strategies failed');
+			return cssSelector;
 		} catch (error) {
-			throw new Error(`Failed to click element: ${(error as Error).message}`);
+			// Fallback to a basic selector with highlight index
+			console.warn('Error creating enhanced selector:', error);
+			return `[highlight_index="${element.highlightIndex}"]`;
 		}
+	}
+
+	/**
+	 * Get element handle with enhanced location strategy
+	 */
+	public async getLocateElement(element: DOMElementNode): Promise<ElementHandle | null> {
+		const page = await this.getPage();
+		let currentFrame: Page | FrameLocator = page;
+
+		try {
+			// Try XPath first if available
+			if (element.xpath) {
+				const simpleSelector = this._convertSimpleXPathToCssSelector(element.xpath);
+				if (simpleSelector) {
+					const elementHandle = await page.$(simpleSelector);
+					if (elementHandle) {
+						await elementHandle.scrollIntoViewIfNeeded();
+						return elementHandle;
+					}
+				}
+
+				// Fallback to XPath if CSS selector fails
+				const elementHandle = await page.$(`xpath=${element.xpath}`);
+				if (elementHandle) {
+					await elementHandle.scrollIntoViewIfNeeded();
+					return elementHandle;
+				}
+			}
+
+			// Build parent chain for shadow DOM traversal
+			const parents: DOMElementNode[] = [];
+			let current = element;
+			while (current.parent) {
+				parents.push(current.parent);
+				current = current.parent;
+			}
+			parents.reverse();
+
+			// Handle shadow DOM and iframe traversal
+			let context: ElementHandle | Page = page;
+			for (const parent of parents) {
+				const parentSelector = this._enhancedCssSelectorForElement(parent);
+
+				if (parent.tagName === 'IFRAME') {
+					const frameElement = await context.$(parentSelector);
+					if (!frameElement) break;
+
+					const frame = await frameElement.contentFrame();
+					if (!frame) break;
+
+					context = frame;
+				} else {
+					const element = await context.$(parentSelector);
+					if (!element) break;
+
+					// Check for shadow root
+					const shadowRoot = await element.evaluateHandle(el => el.shadowRoot);
+					if (shadowRoot.asElement()) {
+						context = shadowRoot.asElement()!;
+					} else {
+						context = element;
+					}
+				}
+			}
+
+			// Find the target element
+			const targetSelector = this._enhancedCssSelectorForElement(element);
+			const elementHandle = await context.$(targetSelector);
+
+			if (elementHandle) {
+				await elementHandle.scrollIntoViewIfNeeded()
+					.catch(() => console.warn('Could not scroll element into view'));
+				return elementHandle;
+			}
+
+			return null;
+		} catch (error) {
+			console.error('Error locating element:', error);
+			return null;
+		}
+	}
+
+	/**
+	 * Take a screenshot of the current page or element
+	 * @param options Screenshot options
+	 * @returns Path to the saved screenshot
+	 */
+	public async takeScreenshot(options: {
+		element?: DOMElementNode;
+		fullPage?: boolean;
+		path?: string;
+	} = {}): Promise<string> {
+		const page = await this.getPage();
+		const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+		const filename = options.path || `screenshot-${timestamp}.png`;
+		const directory = dirname(filename);
+
+		// Ensure directory exists
+		await mkdir(directory, { recursive: true });
+
+		if (options.element) {
+			const elementHandle = await this.getLocateElement(options.element);
+			if (!elementHandle) {
+				throw new Error('Element not found for screenshot');
+			}
+			await elementHandle.screenshot({ path: filename });
+		} else {
+			await page.screenshot({
+				path: filename,
+				fullPage: options.fullPage ?? false
+			});
+		}
+
+		return filename;
+	}
+
+	/**
+	 * Take a screenshot of a specific element by index
+	 * @param index Element index in the selector map
+	 * @param path Optional path to save the screenshot
+	 * @returns Path to the saved screenshot
+	 */
+	public async takeElementScreenshot(index: number, path?: string): Promise<string> {
+		const element = await this.getDomElementByIndex(index);
+		if (!element) {
+			throw new Error(`Element with index ${index} not found`);
+		}
+		return this.takeScreenshot({ element, path });
+	}
+
+	/**
+	 * Take a full page screenshot
+	 * @param path Optional path to save the screenshot
+	 * @returns Path to the saved screenshot
+	 */
+	public async takeFullPageScreenshot(path?: string): Promise<string> {
+		return this.takeScreenshot({ fullPage: true, path });
+	}
+
+	/**
+	 * Validate cookie format
+	 */
+	private _validateCookie(cookie: Cookie): void {
+		if (!cookie.name || typeof cookie.name !== 'string') {
+			throw new Error('Cookie must have a valid name string');
+		}
+
+		if (cookie.value && typeof cookie.value !== 'string') {
+			throw new Error('Cookie value must be a string');
+		}
+
+		if (cookie.url && !this._isValidUrl(cookie.url)) {
+			throw new Error('Cookie URL must be a valid URL string');
+		}
+
+		if (cookie.domain && !this._isValidDomain(cookie.domain)) {
+			throw new Error('Cookie domain must be a valid domain string');
+		}
+
+		if (cookie.path && typeof cookie.path !== 'string') {
+			throw new Error('Cookie path must be a string');
+		}
+
+		if (cookie.expires && typeof cookie.expires !== 'number') {
+			throw new Error('Cookie expires must be a number');
+		}
+
+		if (cookie.httpOnly !== undefined && typeof cookie.httpOnly !== 'boolean') {
+			throw new Error('Cookie httpOnly must be a boolean');
+		}
+
+		if (cookie.secure !== undefined && typeof cookie.secure !== 'boolean') {
+			throw new Error('Cookie secure must be a boolean');
+		}
+
+		if (cookie.sameSite && !['Strict', 'Lax', 'None'].includes(cookie.sameSite)) {
+			throw new Error('Cookie sameSite must be one of: Strict, Lax, None');
+		}
+	}
+
+	/**
+	 * Validate URL format
+	 */
+	private _isValidUrl(url: string): boolean {
+		try {
+			new URL(url);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	/**
+	 * Validate domain format
+	 */
+	private _isValidDomain(domain: string): boolean {
+		const domainRegex = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i;
+		return domainRegex.test(domain);
+	}
+
+	/**
+	 * Get all cookies for the current context
+	 */
+	public async getCookies(): Promise<Cookie[]> {
+		try {
+			const context = await this.getContext();
+			if (!context) {
+				throw new Error('Browser context not initialized');
+			}
+			return context.cookies();
+		} catch (error) {
+			throw new Error(`Failed to get cookies: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
+	/**
+	 * Get cookies for a specific URL
+	 */
+	public async getCookiesForUrl(url: string): Promise<Cookie[]> {
+		if (!this._isValidUrl(url)) {
+			throw new Error('Invalid URL provided');
+		}
+
+		try {
+			const context = await this.getContext();
+			if (!context) {
+				throw new Error('Browser context not initialized');
+			}
+			return context.cookies(url);
+		} catch (error) {
+			throw new Error(`Failed to get cookies for URL ${url}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
+	/**
+	 * Set cookies for the current context
+	 */
+	public async setCookies(cookies: Cookie[]): Promise<void> {
+		if (!Array.isArray(cookies)) {
+			throw new Error('Cookies must be provided as an array');
+		}
+
+		try {
+			// Validate all cookies before setting any
+			for (const cookie of cookies) {
+				this._validateCookie(cookie);
+			}
+
+			const context = await this.getContext();
+			if (!context) {
+				throw new Error('Browser context not initialized');
+			}
+
+			await context.addCookies(cookies);
+		} catch (error) {
+			throw new Error(`Failed to set cookies: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
+	/**
+	 * Clear all cookies from the current context
+	 */
+	public async clearCookies(): Promise<void> {
+		try {
+			const context = await this.getContext();
+			if (!context) {
+				throw new Error('Browser context not initialized');
+			}
+			await context.clearCookies();
+		} catch (error) {
+			throw new Error(`Failed to clear cookies: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
+	/**
+	 * Delete specific cookies by name
+	 */
+	public async deleteCookies(names: string[]): Promise<void> {
+		if (!Array.isArray(names)) {
+			throw new Error('Cookie names must be provided as an array');
+		}
+
+		if (names.some(name => typeof name !== 'string')) {
+			throw new Error('All cookie names must be strings');
+		}
+
+		try {
+			const context = await this.getContext();
+			if (!context) {
+				throw new Error('Browser context not initialized');
+			}
+
+			const currentCookies = await context.cookies();
+			const remainingCookies = currentCookies.filter(cookie => !names.includes(cookie.name));
+
+			await context.clearCookies();
+			if (remainingCookies.length > 0) {
+				await context.addCookies(remainingCookies);
+			}
+		} catch (error) {
+			throw new Error(`Failed to delete cookies: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
+	/**
+	 * Export cookies to a JSON string
+	 */
+	public async exportCookies(): Promise<string> {
+		try {
+			const cookies = await this.getCookies();
+			return JSON.stringify(cookies, null, 2);
+		} catch (error) {
+			throw new Error(`Failed to export cookies: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
+	/**
+	 * Import cookies from a JSON string
+	 */
+	public async importCookies(cookiesJson: string): Promise<void> {
+		if (typeof cookiesJson !== 'string') {
+			throw new Error('Cookie JSON must be a string');
+		}
+
+		try {
+			const cookies = JSON.parse(cookiesJson) as Cookie[];
+			if (!Array.isArray(cookies)) {
+				throw new Error('Invalid cookie JSON format');
+			}
+
+			await this.setCookies(cookies);
+		} catch (error) {
+			if (error instanceof SyntaxError) {
+				throw new Error('Invalid JSON format');
+			}
+			throw new Error(`Failed to import cookies: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
+	/**
+	 * Start intercepting network requests
+	 */
+	public async startRequestInterception(options: {
+		timeout?: number;
+		ignoreErrors?: boolean;
+	} = {}): Promise<void> {
+		const { timeout = 30000, ignoreErrors = false } = options;
+		const page = await this.getPage();
+
+		try {
+			await page.route('**/*', async (route, request) => {
+				const startTime = Date.now();
+
+				try {
+					for (const interceptor of this.requestInterceptors) {
+						const url = request.url();
+						const pattern = interceptor.urlPattern;
+
+						const matches = typeof pattern === 'string'
+							? url.includes(pattern)
+							: pattern.test(url);
+
+						if (matches) {
+							// Check for timeout
+							if (Date.now() - startTime > timeout) {
+								throw new Error(`Request interceptor timeout after ${timeout}ms`);
+							}
+
+							await interceptor.handler(route, request);
+							return;
+						}
+					}
+
+					await route.continue();
+				} catch (error) {
+					if (!ignoreErrors) {
+						console.error('Request interception error:', error);
+						if (error instanceof Error && error.message.includes('timeout')) {
+							await route.abort('timedout');
+						} else {
+							await route.abort('failed');
+						}
+					} else {
+						await route.continue();
+					}
+				}
+			});
+		} catch (error) {
+			throw new Error(`Failed to start request interception: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
+	/**
+	 * Add a request interceptor with validation
+	 */
+	public addRequestInterceptor(interceptor: RequestInterceptor): void {
+		if (!interceptor.urlPattern) {
+			throw new Error('Request interceptor must have a urlPattern');
+		}
+
+		if (typeof interceptor.urlPattern !== 'string' && !(interceptor.urlPattern instanceof RegExp)) {
+			throw new Error('urlPattern must be a string or RegExp');
+		}
+
+		if (typeof interceptor.handler !== 'function') {
+			throw new Error('Request interceptor must have a handler function');
+		}
+
+		this.requestInterceptors.push(interceptor);
+	}
+
+	/**
+	 * Remove a request interceptor
+	 */
+	public removeRequestInterceptor(urlPattern: string | RegExp): void {
+		const initialLength = this.requestInterceptors.length;
+		this.requestInterceptors = this.requestInterceptors.filter(
+			i => i.urlPattern.toString() !== urlPattern.toString()
+		);
+
+		if (this.requestInterceptors.length === initialLength) {
+			console.warn('No request interceptor found with the specified pattern:', urlPattern);
+		}
+	}
+
+	/**
+	 * Clear all request interceptors
+	 */
+	public clearRequestInterceptors(): void {
+		const count = this.requestInterceptors.length;
+		this.requestInterceptors = [];
+		console.debug(`Cleared ${count} request interceptor(s)`);
+	}
+
+	/**
+	 * Start intercepting network responses
+	 */
+	public async startResponseInterception(options: {
+		timeout?: number;
+		ignoreErrors?: boolean;
+	} = {}): Promise<void> {
+		const { timeout = 30000, ignoreErrors = false } = options;
+		const page = await this.getPage();
+
+		try {
+			page.on('response', async (response) => {
+				const startTime = Date.now();
+
+				try {
+					for (const interceptor of this.responseInterceptors) {
+						const url = response.url();
+						const pattern = interceptor.urlPattern;
+
+						const matches = typeof pattern === 'string'
+							? url.includes(pattern)
+							: pattern.test(url);
+
+						if (matches) {
+							// Check for timeout
+							if (Date.now() - startTime > timeout) {
+								throw new Error(`Response interceptor timeout after ${timeout}ms`);
+							}
+
+							await interceptor.handler(response);
+						}
+					}
+				} catch (error) {
+					if (!ignoreErrors) {
+						console.error('Response interception error:', error);
+					}
+				}
+			});
+		} catch (error) {
+			throw new Error(`Failed to start response interception: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
+	/**
+	 * Add a response interceptor with validation
+	 */
+	public addResponseInterceptor(interceptor: ResponseInterceptor): void {
+		if (!interceptor.urlPattern) {
+			throw new Error('Response interceptor must have a urlPattern');
+		}
+
+		if (typeof interceptor.urlPattern !== 'string' && !(interceptor.urlPattern instanceof RegExp)) {
+			throw new Error('urlPattern must be a string or RegExp');
+		}
+
+		if (typeof interceptor.handler !== 'function') {
+			throw new Error('Response interceptor must have a handler function');
+		}
+
+		this.responseInterceptors.push(interceptor);
+	}
+
+	/**
+	 * Remove a response interceptor
+	 */
+	public removeResponseInterceptor(urlPattern: string | RegExp): void {
+		const initialLength = this.responseInterceptors.length;
+		this.responseInterceptors = this.responseInterceptors.filter(
+			i => i.urlPattern.toString() !== urlPattern.toString()
+		);
+
+		if (this.responseInterceptors.length === initialLength) {
+			console.warn('No response interceptor found with the specified pattern:', urlPattern);
+		}
+	}
+
+	/**
+	 * Clear all response interceptors
+	 */
+	public clearResponseInterceptors(): void {
+		const count = this.responseInterceptors.length;
+		this.responseInterceptors = [];
+		console.debug(`Cleared ${count} response interceptor(s)`);
+	}
+
+	/**
+	 * Block requests matching a URL pattern
+	 */
+	public async blockRequests(urlPattern: string | RegExp): Promise<void> {
+		if (!urlPattern) {
+			throw new Error('URL pattern is required');
+		}
+
+		this.addRequestInterceptor({
+			urlPattern,
+			handler: async (route) => {
+				try {
+					await route.abort();
+				} catch (error) {
+					console.error(`Failed to block request: ${error instanceof Error ? error.message : 'Unknown error'}`);
+					await route.continue();
+				}
+			}
+		});
+	}
+
+	/**
+	 * Mock a response for requests matching a URL pattern
+	 */
+	public async mockResponse(urlPattern: string | RegExp, response: {
+		status?: number;
+		headers?: Record<string, string>;
+		body?: string;
+	}): Promise<void> {
+		if (!urlPattern) {
+			throw new Error('URL pattern is required');
+		}
+
+		if (response.status && (typeof response.status !== 'number' || response.status < 100 || response.status > 599)) {
+			throw new Error('Invalid status code');
+		}
+
+		if (response.headers && typeof response.headers !== 'object') {
+			throw new Error('Headers must be an object');
+		}
+
+		this.addRequestInterceptor({
+			urlPattern,
+			handler: async (route) => {
+				try {
+					await route.fulfill({
+						status: response.status ?? 200,
+						headers: response.headers ?? {},
+						body: response.body ?? ''
+					});
+				} catch (error) {
+					console.error(`Failed to mock response: ${error instanceof Error ? error.message : 'Unknown error'}`);
+					await route.continue();
+				}
+			}
+		});
+	}
+
+	/**
+	 * Add an event listener for a specific page event with error handling
+	 */
+	public async addEventListener<T extends PageEventType>(
+		eventType: T,
+		handler: PageEventHandler[T],
+		options: {
+			timeout?: number;
+			once?: boolean;
+		} = {}
+	): Promise<void> {
+		const { timeout = 30000, once = false } = options;
+		const page = await this.getPage();
+
+		try {
+			if (!this.eventHandlers[eventType]) {
+				this.eventHandlers[eventType] = [];
+
+				// Create wrapper function to handle timeouts and errors
+				const wrapperFn = async (...args: any[]) => {
+					const handlers = this.eventHandlers[eventType] || [];
+					for (const handler of handlers) {
+						try {
+							const timeoutPromise = new Promise<never>((_, reject) => {
+								setTimeout(() => reject(new Error(`Event handler timeout after ${timeout}ms`)), timeout);
+							});
+
+							const handlerPromise = Promise.resolve(handler(...args));
+							await Promise.race([handlerPromise, timeoutPromise]);
+
+							if (once) {
+								this.removeEventListener(eventType, handler);
+							}
+						} catch (error) {
+							console.error(`Error in ${eventType} event handler:`, error);
+							// Remove failed handler if it's a one-time handler
+							if (once) {
+								this.removeEventListener(eventType, handler);
+							}
+						}
+					}
+				};
+
+				// Store wrapper function for cleanup
+				(page as any).__eventWrappers = (page as any).__eventWrappers || {};
+				(page as any).__eventWrappers[eventType] = wrapperFn;
+
+				page.on(eventType as any, wrapperFn);
+			}
+
+			this.eventHandlers[eventType]?.push(handler);
+		} catch (error) {
+			throw new Error(`Failed to add event listener: ${error instanceof Error ? error.message : 'Unknown error'}`);
+		}
+	}
+
+	/**
+	 * Remove an event listener for a specific page event
+	 */
+	public removeEventListener<T extends PageEventType>(
+		eventType: T,
+		handler: PageEventHandler[T]
+	): void {
+		const handlers = this.eventHandlers[eventType];
+		if (handlers) {
+			const index = handlers.indexOf(handler);
+			if (index !== -1) {
+				handlers.splice(index, 1);
+
+				// Remove event listener from page if no handlers left
+				if (handlers.length === 0) {
+					this.removeAllEventListeners(eventType);
+				}
+			} else {
+				console.warn(`No handler found for event type: ${eventType}`);
+			}
+		}
+	}
+
+	/**
+	 * Remove all event listeners for a specific event type
+	 */
+	public async removeAllEventListeners(eventType: PageEventType): Promise<void> {
+		try {
+			const page = await this.getPage();
+			const wrapper = (page as any).__eventWrappers?.[eventType];
+
+			if (wrapper) {
+				page.removeListener(eventType as any, wrapper);
+				delete (page as any).__eventWrappers[eventType];
+			}
+
+			this.eventHandlers[eventType] = [];
+		} catch (error) {
+			console.error(`Error removing event listeners for ${eventType}:`, error);
+		}
+	}
+
+	/**
+	 * Clear all event listeners
+	 */
+	public async clearAllEventListeners(): Promise<void> {
+		try {
+			const page = await this.getPage();
+
+			// Remove all event listeners from page
+			for (const eventType of Object.keys(this.eventHandlers) as PageEventType[]) {
+				const wrapper = (page as any).__eventWrappers?.[eventType];
+				if (wrapper) {
+					page.removeListener(eventType as any, wrapper);
+				}
+			}
+
+			// Clear stored wrappers
+			(page as any).__eventWrappers = {};
+
+			// Clear handler arrays
+			this.eventHandlers = {};
+		} catch (error) {
+			console.error('Error clearing event listeners:', error);
+		}
+	}
+
+	/**
+	 * Add a console message listener with error handling
+	 */
+	public async onConsole(handler: PageEventHandler['console']): Promise<void> {
+		await this.addEventListener('console', handler, {
+			timeout: 5000, // Console events should be handled quickly
+			once: false
+		});
+	}
+
+	/**
+	 * Add a dialog listener with error handling
+	 */
+	public async onDialog(handler: PageEventHandler['dialog']): Promise<void> {
+		await this.addEventListener('dialog', handler, {
+			timeout: 30000, // Dialogs might need user interaction
+			once: false
+		});
+	}
+
+	/**
+	 * Add a download listener with error handling
+	 */
+	public async onDownload(handler: PageEventHandler['download']): Promise<void> {
+		await this.addEventListener('download', handler, {
+			timeout: 60000, // Downloads might take longer
+			once: false
+		});
+	}
+
+	/**
+	 * Add a file chooser listener with error handling
+	 */
+	public async onFileChooser(handler: PageEventHandler['filechooser']): Promise<void> {
+		await this.addEventListener('filechooser', handler, {
+			timeout: 30000,
+			once: false
+		});
+	}
+
+	/**
+	 * Add a page error listener with error handling
+	 */
+	public async onPageError(handler: PageEventHandler['pageerror']): Promise<void> {
+		await this.addEventListener('pageerror', handler, {
+			timeout: 5000, // Error handlers should be quick
+			once: false
+		});
+	}
+
+	/**
+	 * Add a popup listener with error handling
+	 */
+	public async onPopup(handler: PageEventHandler['popup']): Promise<void> {
+		await this.addEventListener('popup', handler, {
+			timeout: 30000,
+			once: false
+		});
+	}
+
+	/**
+	 * Add a WebSocket listener with error handling
+	 */
+	public async onWebSocket(handler: PageEventHandler['websocket']): Promise<void> {
+		await this.addEventListener('websocket', handler, {
+			timeout: 30000,
+			once: false
+		});
+	}
+
+	/**
+	 * Add a worker listener with error handling
+	 */
+	public async onWorker(handler: PageEventHandler['worker']): Promise<void> {
+		await this.addEventListener('worker', handler, {
+			timeout: 30000,
+			once: false
+		});
+	}
+
+	/**
+	 * Get the browser context
+	 */
+	private async getContext(): Promise<PlaywrightContext | null> {
+		if (!this.context) {
+			await this.init();
+		}
+		return this.context;
+	}
+
+	/**
+	 * Wait for network to stabilize
+	 */
+	public async waitForStableNetwork(): Promise<void> {
+		const page = await this.getPage();
+		await page.waitForLoadState('networkidle', {
+			timeout: this.config.waitForNetworkIdlePageLoadTime * 1000
+		});
 	}
 }

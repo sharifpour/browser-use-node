@@ -2,6 +2,113 @@
  * Browser types and interfaces
  */
 
+import type { Page, BrowserContext as PlaywrightContext } from "playwright";
+import type { DOMElementNode, DOMHistoryElement } from "../dom/types";
+
+/**
+ * Tab information
+ */
+export interface TabInfo {
+	/**
+	 * Tab URL
+	 */
+	url: string;
+
+	/**
+	 * Tab title
+	 */
+	title: string;
+
+	/**
+	 * Page ID
+	 */
+	pageId: number;
+}
+
+/**
+ * Browser session state
+ */
+export interface BrowserSession {
+	context?: PlaywrightContext;
+	currentPage?: Page;
+	cachedState: BrowserState;
+}
+
+/**
+ * Browser state
+ */
+export interface BrowserState {
+	/**
+	 * Current URL
+	 */
+	url?: string;
+
+	/**
+	 * Page title
+	 */
+	title?: string;
+
+	/**
+	 * Open tabs
+	 */
+	tabs?: TabInfo[];
+
+	/**
+	 * DOM tree
+	 */
+	domTree?: DOMElementNode;
+
+	/**
+	 * Clickable elements
+	 */
+	clickableElements?: DOMElementNode[];
+
+	/**
+	 * Selector map
+	 */
+	selectorMap: Record<number, DOMElementNode>;
+
+	/**
+	 * Screenshot (base64)
+	 */
+	screenshot?: string;
+}
+
+/**
+ * Browser state history
+ */
+export interface BrowserStateHistory {
+	/**
+	 * URL
+	 */
+	url?: string;
+
+	/**
+	 * Page title
+	 */
+	title?: string;
+
+	/**
+	 * Open tabs
+	 */
+	tabs?: TabInfo[];
+
+	/**
+	 * Interacted elements
+	 */
+	interactedElement?: DOMElementNode | null;
+
+	/**
+	 * Screenshot (base64)
+	 */
+	screenshot?: string;
+
+	/**
+	 * Convert to dictionary
+	 */
+	toDict(): Record<string, unknown>;
+}
+
 /**
  * Browser configuration
  */
@@ -9,7 +116,12 @@ export interface BrowserConfig {
 	/**
 	 * Browser type
 	 */
-	browserType: "chromium" | "firefox" | "webkit";
+	browserType?: "chromium" | "firefox" | "webkit";
+
+	/**
+	 * Path to cookies file for persistence
+	 */
+	cookiesFile?: string;
 
 	/**
 	 * Browser launch options
@@ -43,81 +155,11 @@ export interface BrowserConfig {
 }
 
 /**
- * DOM element representation
+ * Browser error
  */
-export interface DOMElement {
-	/**
-	 * Element tag name
-	 */
-	tag: string;
-
-	/**
-	 * Element attributes
-	 */
-	attributes: Record<string, string>;
-
-	/**
-	 * Element XPath
-	 */
-	xpath?: string;
-
-	/**
-	 * Element selector
-	 */
-	selector?: string;
-
-	/**
-	 * Child elements
-	 */
-	children?: DOMElement[];
-}
-
-/**
- * Browser state
- */
-export interface BrowserState {
-	/**
-	 * Current URL
-	 */
-	url: string;
-
-	/**
-	 * Page title
-	 */
-	title: string;
-
-	/**
-	 * Page content
-	 */
-	content: string;
-
-	/**
-	 * Screenshot (base64)
-	 */
-	screenshot?: string;
-
-	/**
-	 * DOM tree
-	 */
-	domTree?: DOMElement;
-
-	/**
-	 * Clickable elements
-	 */
-	clickableElements?: DOMElement[];
-}
-
-/**
- * Browser session
- */
-export interface BrowserSession {
-	/**
-	 * Cached state
-	 */
-	cachedState: {
-		/**
-		 * Map of element indices to DOM elements
-		 */
-		selectorMap: Record<number, DOMElement>;
-	};
+export class BrowserError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "BrowserError";
+	}
 }

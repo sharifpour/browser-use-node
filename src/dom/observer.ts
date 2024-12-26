@@ -2,36 +2,25 @@
  * DOM observer for monitoring and interacting with page elements
  */
 
-import fs from "node:fs";
-import path from "node:path";
 import type { Page } from "playwright";
 import type {
-	DOMElement,
+	DOMElementNode,
 	DOMObservation,
 	DOMQueryOptions,
 	ElementSelector,
 } from "./types";
+import { buildDomTree, parseEvaluatedTree } from "./buildDomTree";
 
-interface NodeData {
-	type?: string;
-	text?: string;
-	isVisible?: boolean;
-	tagName?: string;
-	attributes?: Record<string, string>;
-	xpath?: string;
-	isInteractive?: boolean;
-	shadowRoot?: boolean;
-	highlightIndex?: number;
-	children?: NodeData[];
-}
-
-const defaultQueryOptions: DOMQueryOptions = {
+const DEFAULT_QUERY_OPTIONS: DOMQueryOptions = {
 	waitForVisible: true,
 	waitForEnabled: true,
 	timeout: 5000,
 	includeHidden: false,
 };
 
+/**
+ * DOM observer for monitoring page elements
+ */
 export class DOMObserver {
 	private page: Page;
 
@@ -40,173 +29,121 @@ export class DOMObserver {
 	}
 
 	/**
-	 * Get all clickable elements on the page
+	 * Get clickable elements and DOM tree
 	 */
-	async getClickableElements(
-		highlightElements = true,
-	): Promise<DOMObservation> {
-		const elementTree = await this.buildDomTree(highlightElements);
-		const timestamp = Date.now();
-		const url = this.page.url();
-		const title = await this.page.title();
+	async getClickableElements(includeHidden = false): Promise<DOMObservation> {
+		const [tree, clickableElements, selectorMap] = await Promise.all([
+			this.getDOMTree(),
+			this.getClickableElementsList(includeHidden),
+			this.getSelectorMap()
+		]);
 
 		return {
-			url,
-			title,
-			elements: this.flattenElements(elementTree),
-			timestamp,
+			timestamp: Date.now(),
+			tree,
+			clickableElements,
+			selectorMap
 		};
 	}
 
 	/**
-	 * Build the DOM tree
+	 * Find elements by selector
 	 */
-	private async buildDomTree(highlightElements: boolean): Promise<DOMElement> {
-		// Read the JavaScript code for building DOM tree
-		const jsCode = await fs.promises.readFile(
-			path.join(__dirname, "buildDomTree.js"),
-			"utf-8",
-		);
-
-		const evalPage = await this.page.evaluate(jsCode, [highlightElements]);
-		return this.parseNode(evalPage);
-	}
-
-	/**
-	 * Parse a node from the page evaluation result
-	 */
-	private parseNode(nodeData: NodeData, parent?: DOMElement): DOMElement | null {
-		if (!nodeData) return null;
-
-		if (nodeData.type === "TEXT_NODE") {
-			const textNode: DOMElement = {
-				tag: "text",
-				textContent: nodeData.text,
-				isVisible: nodeData.isVisible,
-				attributes: {},
-			};
-			if (parent) {
-				textNode.parent = parent;
+	async findElements(
+		selector: ElementSelector,
+		options: DOMQueryOptions = DEFAULT_QUERY_OPTIONS
+	): Promise<DOMElementNode[]> {
+		const state = await this.getClickableElements(options.includeHidden);
+		const elements = state.clickableElements.filter(element => {
+			if (selector.index !== undefined && element.highlightIndex !== selector.index) {
+				return false;
 			}
-			return textNode;
-		}
-
-		const element: DOMElement = {
-			tag: nodeData.tagName || "",
-			attributes: nodeData.attributes || {},
-			isVisible: nodeData.isVisible || false,
-			isClickable: nodeData.isInteractive || false,
-			xpath: nodeData.xpath,
-			children: [],
-			shadowRoot: nodeData.shadowRoot || false,
-		};
-
-		if (parent) {
-			element.parent = parent;
-		}
-
-		if (nodeData.highlightIndex !== undefined) {
-			element.highlightIndex = nodeData.highlightIndex;
-			element.selector = `[data-highlight-index="${nodeData.highlightIndex}"]`;
-		}
-
-		if (nodeData.children) {
-			for (const child of nodeData.children) {
-				const childNode = this.parseNode(child, element);
-				if (childNode) {
-					element.children?.push(childNode);
-				}
+			if (selector.xpath && element.xpath !== selector.xpath) {
+				return false;
 			}
+			if (selector.coordinates) {
+				const loc = element.location;
+				if (!loc) return false;
+				return (
+					loc.x === selector.coordinates.x &&
+					loc.y === selector.coordinates.y
+				);
+			}
+			return true;
+		});
+
+		if (options.waitForVisible || options.waitForEnabled) {
+			await this.page.waitForFunction(
+				(elements, xpath) => {
+					const element = document.evaluate(
+						xpath,
+						document,
+						null,
+						XPathResult.FIRST_ORDERED_NODE_TYPE,
+						null
+					).singleNodeValue;
+
+					if (!element) return false;
+
+					const isVisible = element.getBoundingClientRect().height > 0;
+					const isEnabled = !(element as HTMLElement).hasAttribute('disabled');
+
+					return (!options.waitForVisible || isVisible) &&
+						   (!options.waitForEnabled || isEnabled);
+				},
+				{ timeout: options.timeout },
+				elements.map(e => e.xpath)
+			);
 		}
 
-		return element;
-	}
-
-	/**
-	 * Flatten the element tree into an array
-	 */
-	private flattenElements(root: DOMElement): DOMElement[] {
-		const elements: DOMElement[] = [];
-
-		const traverse = (element: DOMElement) => {
-			elements.push(element);
-			if (element.children) {
-				for (const child of element.children) {
-					traverse(child);
-				}
-			}
-		};
-
-		traverse(root);
 		return elements;
 	}
 
 	/**
-	 * Find elements matching the selector
+	 * Get DOM tree
 	 */
-	async findElements(
-		selector: ElementSelector,
-		options: Partial<DOMQueryOptions> = {},
-	): Promise<DOMElement[]> {
-		const mergedOptions = { ...defaultQueryOptions, ...options };
-		const elements = await this.getClickableElements(
-			!mergedOptions.includeHidden,
-		);
-
-		return elements.elements.filter((element) => {
-			if (selector.selector && element.selector !== selector.selector)
-				return false;
-			if (selector.xpath && element.xpath !== selector.xpath) return false;
-			if (selector.text && element.textContent !== selector.text) return false;
-			if (selector.role && element.attributes.role !== selector.role)
-				return false;
-			if (selector.label && element.attributes["aria-label"] !== selector.label)
-				return false;
-			if (selector.id && element.id !== selector.id) return false;
-			if (selector.className && !element.classes?.includes(selector.className))
-				return false;
-			return true;
-		});
+	private async getDOMTree(): Promise<DOMElementNode> {
+		const evalResult = await this.page.evaluate(buildDomTree());
+		const tree = parseEvaluatedTree(evalResult);
+		if (!tree) {
+			throw new Error("Failed to build DOM tree");
+		}
+		return tree;
 	}
 
 	/**
-	 * Find a single element matching the selector
+	 * Get clickable elements list
 	 */
-	async findElement(
-		selector: ElementSelector,
-		options: Partial<DOMQueryOptions> = {},
-	): Promise<DOMElement | null> {
-		const elements = await this.findElements(selector, options);
-		return elements[0] || null;
+	private async getClickableElementsList(includeHidden = false): Promise<DOMElementNode[]> {
+		const tree = await this.getDOMTree();
+		const clickable: DOMElementNode[] = [];
+
+		function traverse(node: DOMElementNode) {
+			if (node.isInteractive && (includeHidden || node.isVisible)) {
+				clickable.push(node);
+			}
+			for (const child of node.children) {
+				traverse(child);
+			}
+		}
+
+		traverse(tree);
+		return clickable;
 	}
 
 	/**
-	 * Check if an element is a file uploader
+	 * Get selector map
 	 */
-	async isFileUploader(element: DOMElement, maxDepth = 3): Promise<boolean> {
-		const checkElement = (el: DOMElement, depth = 0): boolean => {
-			if (depth > maxDepth) return false;
+	private async getSelectorMap(): Promise<Record<number, DOMElementNode>> {
+		const elements = await this.getClickableElementsList();
+		const map: Record<number, DOMElementNode> = {};
 
-			// Check current element
-			if (el.tag === "input") {
-				const isUploader =
-					el.attributes.type === "file" ||
-					el.attributes.accept !== undefined;
-				if (isUploader) return true;
+		for (const el of elements) {
+			if (el.highlightIndex !== undefined) {
+				map[el.highlightIndex] = el;
 			}
+		}
 
-			// Check children
-			if (el.children && depth < maxDepth) {
-				for (const child of el.children) {
-					if (checkElement(child, depth + 1)) {
-						return true;
-					}
-				}
-			}
-
-			return false;
-		};
-
-		return checkElement(element);
+		return map;
 	}
 }

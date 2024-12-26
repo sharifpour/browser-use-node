@@ -11,4 +11,5 @@ export type {
 } from "./types";
 export { AgentError } from "./types";
 export { SystemPrompt } from "./prompts";
-  export { MessageManager } from "./message-manager";
+export { MessageManager } from "./message-manager";
+export { AgentHistory as AgentHistoryImpl, AgentHistoryList } from "./history";

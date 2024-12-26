@@ -1,76 +1,91 @@
 import { config } from "dotenv";
 import { ChatOpenAI } from "langchain/chat_models/openai";
+import type { BrowserContext } from "../dist";
 import { Agent, Browser } from "../dist";
 
 // Load environment variables
 config();
 
 async function main() {
-  console.log('Starting browser...');
-  const browser = new Browser({
-    headless: false,
-    extraChromiumArgs: [
-      '--disable-blink-features=AutomationControlled',
-      '--disable-web-security',
-      '--disable-features=IsolateOrigins',
-      '--disable-site-isolation-trials',
-      '--disable-blink-features=AutomationControlled',
-      '--disable-blink-features=AutomationControlled',
-      '--disable-blink-features=AutomationControlled',
-    ]
-  });
-
-  console.log('Creating browser context...');
-  const browserContext = await browser.newContext({
-    viewport: {
-      width: 1280,
-      height: 800
-    },
-    minimumWaitPageLoadTime: 0.1,
-    waitForNetworkIdlePageLoadTime: 0.2,
-    maximumWaitPageLoadTime: 1.0,
-    waitBetweenActions: 0.1,
-    recordWalkthrough: true,
-    walkthroughPath: './walkthrough.gif',
-    walkthroughDelay: 1000
-  });
-
-  console.log('Initializing LLM...');
-  const llm = new ChatOpenAI({
-    modelName: "gpt-4o-mini",
-    temperature: 0.5,
-    maxTokens: 1000,
-    maxRetries: 3,
-    maxConcurrency: 1
-  });
-
-  console.log('Creating agent...');
-  const agent = new Agent({
-    task: "Go to google.com and search for 'weather today'",
-    llm,
-    useVision: false,
-    browser,
-    browserContext,
-  });
+  let browser: Browser | null = null;
+  let browserContext: BrowserContext | null = null;
 
   try {
-    console.log('Running agent...');
-    const result = await agent.run(5);
-    console.log('Task completed:', result);
+    console.log('🚀 Starting browser...');
+    browser = new Browser({
+      headless: true
+    });
 
-    // Save walkthrough before closing
-    console.log('Saving walkthrough...');
-    await browserContext.saveWalkthrough();
-    await browserContext.close();
+    console.log('🌐 Creating browser context...');
+    browserContext = await browser.newContext({
+      viewport: {
+        width: 1280,
+        height: 800
+      },
+      recordVideo: true,
+      recordVideoPath: 'videos',
+      recordVideoSize: {
+        width: 1280,
+        height: 800
+      },
+      // minimumWaitPageLoadTime: 2.0,
+      // waitForNetworkIdlePageLoadTime: 5.0,
+      // maximumWaitPageLoadTime: 30.0,
+      // waitBetweenActions: 2.0
+    });
+
+    console.log('🤖 Initializing LLM...');
+    const llm = new ChatOpenAI({
+      modelName: 'gpt-3.5-turbo',
+      temperature: 0,
+      maxTokens: 256,
+      maxRetries: 3,
+      maxConcurrency: 1
+    });
+
+    console.log('🎯 Creating agent...');
+    const agent = new Agent({
+      task: 'Compare the weather between Kyiv and Lviv. Use duckduckgo',
+      llm,
+      useVision: false,
+      browser,
+      browserContext,
+    });
+
+    console.log('▶️  Running agent...');
+    const result = await agent.run(10);
+
+    // Format the output nicely
+    console.log('\n📊 Task Results:');
+    console.log('================');
+    if (result.current_state?.memory) {
+      console.log(result.current_state.memory);
+    }
+    if (result.action?.[0]?.done?.data) {
+      console.log('\n📝 Details:');
+      console.log(result.action[0].done.data);
+    }
+
   } catch (error) {
-    console.error('Error:', error);
+    console.error('\n❌ Error:', error);
+    process.exit(1);
   } finally {
-    console.log('Cleaning up...');
-    // Make sure to save walkthrough even if there was an error
-    await browserContext.saveWalkthrough();
-    await browserContext.close();
-    await browser.close();
+    console.log('\n🧹 Cleaning up...');
+    if (browserContext) await browserContext.close();
+    if (browser) await browser.close();
+    process.exit(0);
   }
 }
 
-main().catch(console.error);
+// Handle uncaught errors
+process.on('uncaughtException', (error) => {
+  console.error('\n💥 Uncaught exception:', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (error) => {
+  console.error('\n💥 Unhandled rejection:', error);
+  process.exit(1);
+});
+
+main();

@@ -2,29 +2,40 @@
  * Main library exports
  */
 
-export { Agent } from "./agent/agent";
-export { Browser } from "./browser/browser";
-export { BrowserContext } from "./browser/context";
-export { Controller } from "./controller/controller";
-export { DOMObserver } from "./dom/observer";
-
-// Types
-export type {
-	AgentConfig,
-	AgentHistory,
-	AgentMessage,
-	AgentState,
-	AgentStepInfo,
-	AgentStatus,
+export {
+	Agent,
 	AgentError,
+	SystemPrompt,
+	MessageManager,
+	AgentHistory as AgentHistoryImpl,
+	AgentHistoryList
+} from "./agent";
+
+export type {
+	AgentRunConfig,
+	AgentStatus,
+	AgentConfig,
+	AgentOutput,
+	AgentState,
+	AgentMessage,
+	AgentHistory,
+	AgentStepInfo,
 } from "./agent/types";
 
 export type {
 	BrowserConfig,
 	BrowserState,
 	BrowserSession,
-	DOMElement,
+	BrowserStateHistory,
 } from "./browser/types";
+
+export type {
+	DOMElementNode,
+	DOMHistoryElement,
+	DOMQueryOptions,
+	ElementSelector,
+	DOMObservation
+} from "./dom/types";
 
 export type {
 	ActionResult,

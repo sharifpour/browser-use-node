@@ -2,8 +2,9 @@
  * Agent types and interfaces
  */
 
-import type { BrowserState } from "../browser/types";
-import type { BrowserContextConfig } from "../browser/context";
+import type { BrowserState, BrowserStateHistory } from "../browser/types";
+import type { BrowserContextConfig } from "../browser/config";
+import type { DOMHistoryElement } from "../dom/types";
 
 /**
  * Agent brain - matches Python's AgentBrain model
@@ -29,9 +30,24 @@ export interface AgentBrain {
  * Action result - matches Python's ActionResult model
  */
 export interface ActionResult {
+	/**
+	 * Whether the action is done
+	 */
 	is_done?: boolean;
+
+	/**
+	 * Content extracted from the action
+	 */
 	extracted_content?: string;
+
+	/**
+	 * Error message if the action failed
+	 */
 	error?: string;
+
+	/**
+	 * Whether to include the result in memory
+	 */
 	include_in_memory: boolean;
 }
 
@@ -39,11 +55,90 @@ export interface ActionResult {
  * Agent history - matches Python's AgentHistory
  */
 export interface AgentHistory {
-	step_number: number;
-	browser_state: BrowserState;
-	model_output: AgentOutput;
-	action_result: ActionResult;
-	timestamp: number;
+	/**
+	 * Model output from this step
+	 */
+	model_output: AgentOutput | null;
+
+	/**
+	 * Results from executing actions
+	 */
+	result: ActionResult[];
+
+	/**
+	 * Browser state during this step
+	 */
+	state: BrowserStateHistory;
+
+	/**
+	 * Convert to dictionary
+	 */
+	toDict(): Record<string, unknown>;
+
+	/**
+	 * Get interacted elements from this step
+	 */
+	getInteractedElement(model_output: AgentOutput, selector_map: Record<number, unknown>): Array<DOMHistoryElement | null>;
+}
+
+/**
+ * Agent history list - matches Python's AgentHistoryList
+ */
+export interface AgentHistoryList {
+	/**
+	 * List of history items
+	 */
+	history: AgentHistory[];
+
+	/**
+	 * Get last action in history
+	 */
+	lastAction(): Record<string, unknown> | null;
+
+	/**
+	 * Get all errors from history
+	 */
+	errors(): string[];
+
+	/**
+	 * Get final result from history
+	 */
+	finalResult(): string | null;
+
+	/**
+	 * Check if agent is done
+	 */
+	isDone(): boolean;
+
+	/**
+	 * Check if agent has errors
+	 */
+	hasErrors(): boolean;
+
+	/**
+	 * Get all unique URLs from history
+	 */
+	urls(): string[];
+
+	/**
+	 * Get all screenshots from history
+	 */
+	screenshots(): string[];
+
+	/**
+	 * Save history to file
+	 */
+	saveToFile(path: string): Promise<void>;
+
+	/**
+	 * Load history from file
+	 */
+	loadFromFile(path: string): Promise<void>;
+
+	/**
+	 * Convert to dictionary
+	 */
+	toDict(): Record<string, unknown>;
 }
 
 /**
@@ -54,6 +149,96 @@ export interface AgentOutput {
 	action: Array<{
 		[key: string]: Record<string, unknown>;
 	}>;
+}
+
+/**
+ * Agent step info - matches Python's AgentStepInfo
+ */
+export interface AgentStepInfo {
+	step_number: number;
+	max_steps: number;
+}
+
+/**
+ * Agent error types - enhanced error handling
+ */
+export class AgentError extends Error {
+	static readonly VALIDATION_ERROR = 'Invalid model output format. Please follow the correct schema.';
+	static readonly RATE_LIMIT_ERROR = 'Rate limit reached. Waiting before retry.';
+	static readonly NO_VALID_ACTION = 'No valid action found';
+
+	constructor(
+		message: string,
+		public readonly type: "validation" | "execution" | "browser" | "llm" = "execution",
+		public readonly includeTrace = false
+	) {
+		super(message);
+		this.name = "AgentError";
+	}
+
+	/**
+	 * Format error message
+	 */
+	static formatError(error: Error, includeTrace = false): string {
+		if (error instanceof AgentError) {
+			return error.message;
+		}
+		if (error.name === 'ValidationError') {
+			return `${AgentError.VALIDATION_ERROR}\nDetails: ${error.message}`;
+		}
+		if (error.name === 'RateLimitError') {
+			return AgentError.RATE_LIMIT_ERROR;
+		}
+		return includeTrace ? `${error.message}\nStacktrace:\n${error.stack}` : error.message;
+	}
+}
+
+/**
+ * Agent status enum
+ */
+export enum AgentStatus {
+	IDLE = 'idle',
+	RUNNING = 'running',
+	COMPLETED = 'completed',
+	FAILED = 'failed'
+}
+
+/**
+ * Agent state interface
+ */
+export interface AgentState {
+	status: AgentStatus;
+	currentStep: number;
+	history: AgentHistory[];
+}
+
+/**
+ * Agent message interface
+ */
+export interface AgentMessage {
+	type: 'info' | 'error' | 'success';
+	content: string;
+	timestamp: number;
+}
+
+/**
+ * Agent telemetry event interface
+ */
+export interface AgentTelemetryEvent {
+	agent_id: string;
+	task: string;
+	success?: boolean;
+	steps?: number;
+	error?: string;
+	timestamp: number;
+}
+
+/**
+ * Agent validation result interface
+ */
+export interface ValidationResult {
+	is_valid: boolean;
+	reason: string;
 }
 
 /**
@@ -154,53 +339,4 @@ export interface AgentConfig {
 		model?: string;
 		maxTokens?: number;
 	};
-}
-
-/**
- * Agent step info - matches Python's AgentStepInfo
- */
-export interface AgentStepInfo {
-	step_number: number;
-	max_steps: number;
-}
-
-/**
- * Agent error types - enhanced error handling
- */
-export class AgentError extends Error {
-	constructor(
-		message: string,
-		public readonly type: "validation" | "execution" | "browser" | "llm" = "execution"
-	) {
-		super(message);
-		this.name = "AgentError";
-	}
-}
-
-/**
- * Agent status enum
- */
-export enum AgentStatus {
-	IDLE = 'idle',
-	RUNNING = 'running',
-	COMPLETED = 'completed',
-	FAILED = 'failed'
-}
-
-/**
- * Agent state interface
- */
-export interface AgentState {
-	status: AgentStatus;
-	currentStep: number;
-	history: AgentHistory[];
-}
-
-/**
- * Agent message interface
- */
-export interface AgentMessage {
-	type: 'info' | 'error' | 'success';
-	content: string;
-	timestamp: number;
 }

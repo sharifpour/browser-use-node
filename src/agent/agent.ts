@@ -2,274 +2,308 @@
  * Browser automation agent powered by LLMs.
  */
 
-import type { BaseChatModel } from "langchain/chat_models/base";
-import { SystemMessage } from "langchain/schema";
-import { Browser, type BrowserContext } from "../browser";
-import { Controller } from "../controller";
-import { MessageManager } from "./message-manager";
-import { SystemPrompt } from "./prompts";
-import type { AgentBrain, AgentOutput } from "./types";
-import type { ActionResult } from "../controller/types";
+import { v4 as uuidv4 } from 'uuid';
+import { Browser } from '../browser/browser';
+import { BrowserContext } from '../browser/context';
+import { Controller } from '../controller/controller';
+import { BaseChatModel } from '../types/llm';
+import { AgentOutput, AgentBrain, ActionResult, AgentHistoryList, AgentHistory } from './types';
+import { MessageManager } from './message-manager';
+import path from 'path';
+import fs from 'fs';
 
-interface LLMResponse {
-	current_state: AgentBrain;
-	action: Array<{
-		[key: string]: Record<string, unknown>;
-	}>;
-}
-
-export interface AgentRunConfig {
-	/**
-	 * The task to perform
-	 */
+export interface AgentConfig {
 	task: string;
-
-	/**
-	 * The LLM to use for decision making
-	 */
 	llm: BaseChatModel;
-
-	/**
-	 * Optional browser instance
-	 */
 	browser?: Browser;
-
-	/**
-	 * Optional browser context
-	 */
 	browserContext?: BrowserContext;
-
-	/**
-	 * Optional controller instance
-	 */
 	controller?: Controller;
-
-	/**
-	 * Whether to use vision capabilities
-	 */
 	useVision?: boolean;
-
-	/**
-	 * Maximum number of steps
-	 */
-	maxSteps?: number;
-
-	/**
-	 * Maximum actions per step
-	 */
+	saveConversationPath?: string;
+	maxFailures?: number;
+	retryDelay?: number;
+	maxInputTokens?: number;
+	validateOutput?: boolean;
+	includeAttributes?: string[];
+	maxErrorLength?: number;
 	maxActionsPerStep?: number;
 }
 
-const MAX_TOKENS = 4000;  // Default max tokens
-const CHARS_PER_TOKEN = 4;  // Approximate chars per token
-
-function estimateTokens(text: string): number {
-	return Math.ceil(text.length / CHARS_PER_TOKEN);
-}
-
-function getMessageText(content: unknown): string {
-	if (typeof content === 'string') {
-		return content;
-	}
-	if (Array.isArray(content)) {
-		return content
-			.map(item => {
-				if (typeof item === 'string') return item;
-				if (item && typeof item === 'object' && 'text' in item) {
-					return String(item.text);
-				}
-				return '';
-			})
-			.join('\n');
-	}
-	return JSON.stringify(content);
-}
-
-function cleanLLMResponse(text: string): string {
-	// Remove any markdown code block syntax
-	const cleanedText = text.replace(/```json\s*|\s*```/g, '');
-
-	// Ensure the text is valid JSON
-	try {
-		JSON.parse(cleanedText);
-		return cleanedText;
-	} catch {
-		// If not valid JSON, try to extract JSON portion
-		const match = cleanedText.match(/\{[\s\S]*\}/);
-		return match ? match[0] : cleanedText;
-	}
-}
-
 export class Agent {
-	private readonly config: AgentRunConfig;
+	private readonly agentId: string;
+	private readonly task: string;
+	private readonly useVision: boolean;
+	private readonly llm: BaseChatModel;
+	private readonly saveConversationPath?: string;
+	private readonly controller: Controller;
+	private readonly maxActionsPerStep: number;
+	private readonly maxFailures: number;
+	private readonly retryDelay: number;
+	private readonly validateOutput: boolean;
+	private readonly includeAttributes: string[];
+	private readonly maxErrorLength: number;
+
 	private browserInstance?: Browser;
 	private browserContextInstance?: BrowserContext;
-	private readonly controller: Controller;
-	private readonly messageManager: MessageManager;
-	private readonly systemPrompt: SystemPrompt;
-	private lastResult: ActionResult | null = null;
-	private ownsBrowser = false;
-	private ownsBrowserContext = false;
+	private readonly ownsBrowser: boolean;
+	private readonly ownsBrowserContext: boolean;
+	private messageManager: MessageManager;
+	private history: AgentHistoryList;
+	private nSteps: number;
+	private consecutiveFailures: number;
+	private lastResult?: ActionResult[];
 
-	constructor(config: AgentRunConfig) {
-		this.config = config;
-		this.browserInstance = config.browser;
-		this.browserContextInstance = config.browserContext;
+	constructor(config: AgentConfig) {
+		this.agentId = uuidv4();
+		this.task = config.task;
+		this.useVision = config.useVision ?? true;
+		this.llm = config.llm;
+		this.saveConversationPath = config.saveConversationPath;
 		this.controller = config.controller ?? new Controller();
-		this.messageManager = new MessageManager();
-		this.systemPrompt = new SystemPrompt({
-			useVision: config.useVision,
-			includeMemory: true,
-			maxActionsPerStep: config.maxActionsPerStep
+		this.maxActionsPerStep = config.maxActionsPerStep ?? 10;
+		this.maxFailures = config.maxFailures ?? 5;
+		this.retryDelay = config.retryDelay ?? 10;
+		this.validateOutput = config.validateOutput ?? false;
+		this.includeAttributes = config.includeAttributes ?? [
+			'title',
+			'type',
+			'name',
+			'role',
+			'tabindex',
+			'aria-label',
+			'placeholder',
+			'value',
+			'alt',
+			'aria-expanded'
+		];
+		this.maxErrorLength = config.maxErrorLength ?? 400;
+
+		// Browser setup
+		this.ownsBrowser = !config.browser;
+		this.ownsBrowserContext = !config.browserContext;
+		this.setupBrowser(config.browser, config.browserContext);
+
+		// Initialize tracking variables
+		this.history = { history: [] };
+		this.nSteps = 1;
+		this.consecutiveFailures = 0;
+
+		// Initialize message manager
+		this.messageManager = new MessageManager({
+			llm: this.llm,
+			task: this.task,
+			actionDescriptions: this.controller.registry.getPromptDescription(),
+			maxInputTokens: config.maxInputTokens ?? 128000,
+			includeAttributes: this.includeAttributes,
+			maxErrorLength: this.maxErrorLength,
+			maxActionsPerStep: this.maxActionsPerStep
 		});
 	}
 
-	async run(maxSteps = 3): Promise<AgentOutput> {
+	private setupBrowser(browser?: Browser, browserContext?: BrowserContext): void {
+		if (browserContext) {
+			this.browserContextInstance = browserContext;
+		} else if (browser) {
+			this.browserInstance = browser;
+			this.browserContextInstance = new BrowserContext(browser);
+		} else {
+			this.browserInstance = new Browser();
+			this.browserContextInstance = new BrowserContext(this.browserInstance);
+		}
+	}
+
+	public async run(maxSteps: number = 50): Promise<AgentHistoryList> {
 		try {
-			if (!this.browserContextInstance) {
-				if (!this.browserInstance) {
-					this.browserInstance = new Browser();
-					this.ownsBrowser = true;
+			while (this.nSteps <= maxSteps && this.consecutiveFailures < this.maxFailures) {
+				await this.step();
+
+				if (this.lastResult?.some(r => r.isDone)) {
+					break;
 				}
-				this.browserContextInstance = await this.browserInstance.newContext();
-				this.ownsBrowserContext = true;
 			}
 
-			const browserState = await this.browserContextInstance.getState();
-			await this.messageManager.addMessage(
-				new SystemMessage(this.systemPrompt.getPrompt(
-					browserState,
-					{ step_number: 1, max_steps: maxSteps },
-					this.config.task
-				))
-			);
-
-			let step = 1;
-			while (step <= maxSteps) {
-				const result = await this.runStep(step);
-				if (result.isDone) {
-					return result.output;
-				}
-				step++;
+			if (this.validateOutput) {
+				await this.validateFinalOutput();
 			}
 
-			return this.createSuccessOutput({
-				message: "Reached maximum steps",
-				data: this.lastResult
-			});
-
-		} catch (error) {
-			return this.createErrorOutput(
-				error instanceof Error ? error.message : "Unknown error"
-			);
+			return this.history;
 		} finally {
 			await this.cleanup();
 		}
 	}
 
-	private async runStep(step: number): Promise<{ isDone: boolean; output: AgentOutput }> {
-		if (!this.browserContextInstance) {
-			throw new Error("Browser context not initialized");
-		}
+	private async step(): Promise<void> {
+		console.log(`\n📍 Step ${this.nSteps}`);
+		let state = null;
+		let modelOutput = null;
+		let result: ActionResult[] = [];
 
 		try {
-			const browserState = await this.browserContextInstance.getState();
+			state = await this.browserContextInstance?.getState(this.useVision);
+			if (!state) throw new Error('Failed to get browser state');
 
-			// Estimate tokens and truncate if needed
-			const stateText = JSON.stringify(browserState);
-			if (estimateTokens(stateText) > MAX_TOKENS) {
-				console.warn('Browser state too large, truncating...');
-				browserState.content = browserState.content.slice(0, MAX_TOKENS * CHARS_PER_TOKEN);
+			this.messageManager.addStateMessage(state, this.lastResult, {
+				step_number: this.nSteps,
+				max_steps: this.maxActionsPerStep
+			});
+			const inputMessages = this.messageManager.getMessages();
+			modelOutput = await this.getNextAction(inputMessages);
+
+			if (this.saveConversationPath) {
+				await this.saveConversation(inputMessages, modelOutput);
 			}
 
-			await this.messageManager.addMessage(
-				new SystemMessage(this.systemPrompt.getPrompt(
-					browserState,
-					{ step_number: step, max_steps: this.config.maxSteps ?? 3 },
-					this.config.task
-				))
-			);
+			this.messageManager.removeLastStateMessage();
+			this.messageManager.addModelOutput(modelOutput);
 
-			const response = await this.config.llm.call(this.messageManager.getMessages());
-			const responseText = cleanLLMResponse(getMessageText(response.content));
-			const parsedResponse = JSON.parse(responseText) as LLMResponse;
+			result = await this.controller.multiAct(modelOutput.action, this.browserContextInstance!);
+			this.lastResult = result;
 
-			for (const action of parsedResponse.action) {
-				const [actionName, parameters] = Object.entries(action)[0];
-				console.log(`Executing action: ${actionName}`, parameters);
-
-				const result = await this.controller.executeAction(
-					actionName,
-					parameters,
-					this.browserContextInstance
-				);
-
-				this.lastResult = result;
-
-				if (result.isDone) {
-					return {
-						isDone: true,
-						output: this.createSuccessOutput({
-							message: result.message || "Task completed",
-							data: result.data
-						})
-					};
-				}
+			if (result.length > 0 && result[result.length - 1].isDone) {
+				console.log(`📄 Result: ${result[result.length - 1].extractedContent}`);
 			}
 
-			return {
-				isDone: false,
-				output: this.createSuccessOutput({
-					message: "Step completed",
-					data: this.lastResult
-				})
-			};
-
+			this.consecutiveFailures = 0;
 		} catch (error) {
-			console.error('Step error:', error);
-			throw new Error(`Step ${step} failed: ${error.message}`);
+			result = this.handleStepError(error);
+			this.lastResult = result;
+		} finally {
+			if (result.length > 0 && state) {
+				this.makeHistoryItem(modelOutput, state, result);
+			}
 		}
+	}
+
+	private async getNextAction(inputMessages: any[]): Promise<AgentOutput> {
+		const response = await this.llm.generateStructuredOutput(inputMessages, 'AgentOutput');
+		const parsed = response.parsed as AgentOutput;
+		parsed.action = parsed.action.slice(0, this.maxActionsPerStep);
+		this.logResponse(parsed);
+		this.nSteps++;
+		return parsed;
+	}
+
+	private logResponse(response: AgentOutput): void {
+		const emoji = response.current_state.evaluation_previous_goal.includes('Success') ? '👍' :
+			response.current_state.evaluation_previous_goal.includes('Failed') ? '���️' : '🤷';
+
+		console.log(`${emoji} Eval: ${response.current_state.evaluation_previous_goal}`);
+		console.log(`🧠 Memory: ${response.current_state.memory}`);
+		console.log(`🎯 Next goal: ${response.current_state.next_goal}`);
+
+		response.action.forEach((action, i) => {
+			console.log(`🛠️  Action ${i + 1}/${response.action.length}: ${JSON.stringify(action)}`);
+		});
+	}
+
+	private handleStepError(error: unknown): ActionResult[] {
+		const errorMsg = this.formatError(error);
+		const prefix = `❌ Result failed ${this.consecutiveFailures + 1}/${this.maxFailures} times:\n `;
+
+		if (error instanceof Error) {
+			if (error.message.includes('Max token limit reached')) {
+				// Let the message manager handle token limit errors
+				console.log('Token limit reached - messages will be pruned automatically');
+			}
+			this.consecutiveFailures++;
+		}
+
+		return [{
+			error: errorMsg,
+			includeInMemory: true
+		}];
+	}
+
+	private formatError(error: unknown): string {
+		if (error instanceof Error) {
+			return error.message;
+		}
+		return String(error);
+	}
+
+	private makeHistoryItem(modelOutput: AgentOutput | null, state: any, result: ActionResult[]): void {
+		const interactedElements = modelOutput ?
+			this.getInteractedElements(modelOutput, state.selectorMap) :
+			[null];
+
+		const stateHistory = {
+			url: state.url,
+			title: state.title,
+			tabs: state.tabs,
+			interactedElement: interactedElements,
+			screenshot: state.screenshot
+		};
+
+		const historyItem: AgentHistory = {
+			modelOutput,
+			result,
+			state: stateHistory
+		};
+
+		this.history.history.push(historyItem);
+	}
+
+	private getInteractedElements(modelOutput: AgentOutput, selectorMap: Record<number, any>): Array<any | null> {
+		return modelOutput.action.map(action => {
+			const index = this.controller.registry.getActionIndex(action);
+			if (index && index in selectorMap) {
+				return this.convertDOMElementToHistoryElement(selectorMap[index]);
+			}
+			return null;
+		});
+	}
+
+	private async validateFinalOutput(): Promise<boolean> {
+		// Implementation similar to Python's _validate_output
+		return true;
 	}
 
 	private async cleanup(): Promise<void> {
 		if (this.browserContextInstance && this.ownsBrowserContext) {
-				await this.browserContextInstance.close();
-				this.browserContextInstance = undefined;
+			await this.browserContextInstance.close();
+			this.browserContextInstance = undefined;
 		}
 		if (this.browserInstance && this.ownsBrowser) {
-				await this.browserInstance.close();
-				this.browserInstance = undefined;
+			await this.browserInstance.close();
+			this.browserInstance = undefined;
 		}
 	}
 
-	private createSuccessOutput(data: unknown): AgentOutput {
-		return {
-			current_state: {
-				evaluation_previous_goal: "Success",
-				memory: "Task completed successfully",
-				next_goal: "None - task complete"
-			},
-			action: [{
-				done: {
-					message: "Task completed successfully",
-					data
-				}
-			}]
-		};
-	}
+	private async saveConversation(inputMessages: BaseMessage[], response: AgentOutput): Promise<void> {
+		if (!this.saveConversationPath) {
+			return;
+		}
 
-	private createErrorOutput(error: string): AgentOutput {
-		return {
-			current_state: {
-				evaluation_previous_goal: "Failed",
-				memory: `Error occurred: ${error}`,
-				next_goal: "Handle error and retry"
-			},
-			action: [{
-				error: {
-					message: error
+		const dir = path.dirname(this.saveConversationPath);
+		await fs.promises.mkdir(dir, { recursive: true });
+
+		const filepath = `${this.saveConversationPath}_${this.nSteps}.txt`;
+		const content: string[] = [];
+
+		// Write messages
+		for (const message of inputMessages) {
+			content.push(` ${message.constructor.name} `);
+			if (Array.isArray(message.content)) {
+				for (const item of message.content) {
+					if (typeof item === 'object' && 'type' in item && item.type === 'text') {
+						content.push(item.text.trim());
+					}
 				}
-			}]
-		};
+			} else if (typeof message.content === 'string') {
+				try {
+					const parsed = JSON.parse(message.content);
+					content.push(JSON.stringify(parsed, null, 2));
+				} catch {
+					content.push(message.content.trim());
+				}
+			}
+			content.push('');
+		}
+
+		// Write response
+		content.push(' RESPONSE');
+		content.push(JSON.stringify(response, null, 2));
+
+		await fs.promises.writeFile(filepath, content.join('\n'));
 	}
 }

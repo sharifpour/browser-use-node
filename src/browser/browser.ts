@@ -3,7 +3,8 @@
  */
 
 import { type Browser as PlaywrightBrowser, webkit } from "playwright";
-import { BrowserContext, type BrowserContextConfig } from "./context";
+import { BrowserContext } from "./context";
+import type { BrowserContextConfig } from "./config";
 
 export interface ProxySettings {
 	server: string;
@@ -69,7 +70,7 @@ export interface BrowserConfig {
 const defaultConfig: BrowserConfig = {
 	headless: false,
 	disableSecurity: true,
-	extraChromiumArgs: [],
+	extraChromiumArgs: []
 };
 
 /**
@@ -90,7 +91,7 @@ export class Browser {
 	 * Create a browser context
 	 */
 	async newContext(config: BrowserContextConfig = {}): Promise<BrowserContext> {
-    return new BrowserContext(this, config);
+		return new BrowserContext(this, config);
 	}
 
 	/**
@@ -116,7 +117,7 @@ export class Browser {
 	 */
 	private async setupBrowser(): Promise<PlaywrightBrowser> {
 		if (this.config.wssUrl) {
-      return webkit.connect(this.config.wssUrl);
+			return webkit.connect(this.config.wssUrl);
 		}
 
 		if (this.config.chromeInstancePath) {
@@ -132,30 +133,26 @@ export class Browser {
 				]
 			: [];
 
-
-    return webkit.launch({
+		return webkit.launch({
 			headless: this.config.headless,
 			args: [
 				"--no-sandbox",
 				"--disable-blink-features=AutomationControlled",
 				"--disable-infobars",
 				"--disable-background-timer-throttling",
-        // "--disable-popup-blocking",
 				"--disable-backgrounding-occluded-windows",
 				"--disable-renderer-backgrounding",
 				"--disable-window-activation",
 				"--disable-focus-on-load",
-        // "--no-first-run",
 				"--no-default-browser-check",
 				"--no-startup-window",
 				"--window-position=0,0",
-        "--window-size=1280,800",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-        "--disable-setuid-sandbox",
-        "--no-zygote",
-        "--single-process",
-        "--disable-dev-shm-usage",
+				"--window-size=1280,800",
+				"--disable-dev-shm-usage",
+				"--disable-gpu",
+				"--disable-setuid-sandbox",
+				"--no-zygote",
+				"--single-process",
 				...disableSecurityArgs,
 				...(this.config.extraChromiumArgs || []),
 			],
@@ -167,9 +164,56 @@ export class Browser {
 	 * Close the browser instance
 	 */
 	async close(): Promise<void> {
-		if (this.playwrightBrowser) {
-			await this.playwrightBrowser.close();
+		console.debug('Closing browser instance');
+
+		try {
+			if (this.playwrightBrowser) {
+				// Close all contexts first
+				for (const context of this.playwrightBrowser.contexts()) {
+					try {
+						await context.close();
+					} catch (error) {
+						console.debug(`Failed to close context: ${error}`);
+					}
+				}
+
+				// Close browser
+				try {
+					await this.playwrightBrowser.close();
+				} catch (error) {
+					console.debug(`Failed to close browser: ${error}`);
+				}
+			}
+		} finally {
 			this.playwrightBrowser = null;
+		}
+	}
+
+	/**
+	 * Cleanup when object is destroyed
+	 */
+	async cleanup(): Promise<void> {
+		try {
+			if (this.playwrightBrowser) {
+				// Try to get running event loop
+				let loop: any;
+				try {
+					loop = (global as any).process._getActiveHandles?.();
+				} catch {
+					// Ignore error
+				}
+
+				if (loop?.length > 0) {
+					// Event loop is running, create task
+					loop[0].unref();
+					await this.close();
+				} else {
+					// No event loop, run sync
+					await this.close();
+				}
+			}
+		} catch (error) {
+			console.debug(`Failed to cleanup browser in destructor: ${error}`);
 		}
 	}
 }

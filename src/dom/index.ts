@@ -1,3 +1,13 @@
+/**
+ * DOM module exports
+ */
+
 export * from "./types";
-export * from "./observer";
-export * from "./history-tree-processor";
+export { DOMService } from "./service";
+export { DOMObserver } from "./observer";
+
+// Tree processing utilities
+export {
+    convertDOMElementToHistoryElement,
+    findHistoryElementInTree,
+} from "./tree-processor";
