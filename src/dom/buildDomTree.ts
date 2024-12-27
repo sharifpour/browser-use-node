@@ -10,11 +10,9 @@ interface ComputedStyle {
     opacity: string;
 }
 
-declare global {
-    interface Window {
-        getComputedStyle(element: Element): ComputedStyle;
-        readonly innerHeight: number;
-    }
+type WindowWithComputedStyle = Window & {
+    getComputedStyle(element: Element): ComputedStyle;
+    readonly innerHeight: number;
 }
 
 export const buildDomTree = (): string => `
@@ -23,7 +21,7 @@ export const buildDomTree = (): string => `
     function isElementVisible(element: Element): boolean {
         if (!element) return false;
 
-        const style = window.getComputedStyle(element);
+        const style = (window as WindowWithComputedStyle).getComputedStyle(element);
         const rect = element.getBoundingClientRect();
 
         return (
@@ -33,7 +31,7 @@ export const buildDomTree = (): string => `
             rect.width > 0 &&
             rect.height > 0 &&
             rect.top >= 0 &&
-            rect.top <= window.innerHeight
+            rect.top <= (window as WindowWithComputedStyle).innerHeight
         );
     }
 
@@ -206,10 +204,11 @@ export function parseEvaluatedTree(evalResult: unknown): DOMElementNode | null {
                 .map(child => parseEvaluatedTree(child))
                 .filter((child): child is DOMElementNode => child !== null)
             : [],
-        text: node.text as string | undefined,
         isInteractive: Boolean(node.isInteractive),
+        isTopElement: false, // This will be set by the parent if needed
         shadowRoot: Boolean(node.shadowRoot),
         highlightIndex: typeof node.highlightIndex === 'number' ? node.highlightIndex : undefined,
-        location: node.location as DOMElementNode['location']
+        location: node.location as DOMElementNode['location'],
+        isClickable: Boolean(node.isInteractive) // Set isClickable based on isInteractive
     };
 }
