@@ -35,3 +35,7 @@ We are grateful for their pioneering work in browser automation with LLMs.
 ## Contributing
 
 We welcome contributions! Please see our [Contributing Guidelines](./CONTRIBUTING.md) for details on how to get started and our development process. By participating in this project, you agree to abide by our [Code of Conduct](./CODE_OF_CONDUCT.md).
+
+## Security
+
+We take security seriously. If you discover a security vulnerability, please follow our [Security Policy](./SECURITY.md) for responsible disclosure.
