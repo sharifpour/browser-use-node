@@ -31,3 +31,7 @@ We are grateful for their pioneering work in browser automation with LLMs.
 - Modern async/await API
 
 ## Installation
+
+## Contributing
+
+We welcome contributions! Please see our [Contributing Guidelines](./CONTRIBUTING.md) for details on how to get started and our development process. By participating in this project, you agree to abide by our [Code of Conduct](./CODE_OF_CONDUCT.md).
