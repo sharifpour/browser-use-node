@@ -1,73 +1,41 @@
-# Browser Use Node Documentation
+# Website
 
-Welcome to the Browser Use Node documentation! This library provides powerful browser automation capabilities powered by LLMs.
-
-## Table of Contents
-
-### [API Documentation](api/README.md)
-- Core Classes
-- Actions
-- Events
-- Types
-
-### [User Guide](guides/README.md)
-- Getting Started
-- Common Use Cases
-- Advanced Features
-- Best Practices
-- Troubleshooting
-
-### [Examples](examples/README.md)
-- Basic Examples
-- Advanced Examples
-- Performance Examples
-
-## Quick Start
+This website is built using [Docusaurus](https://docusaurus.io/), a modern static website generator.
 
 ### Installation
-```bash
-npm install browser-use-node
+
+```
+$ yarn
 ```
 
-### Basic Usage
-```typescript
-import { Browser } from 'browser-use-node';
+### Local Development
 
-async function example() {
-  const browser = new Browser({ headless: true });
-  const context = await browser.newContext();
-  const page = await context.getPage();
-
-  try {
-    await page.goto('https://example.com');
-    await page.click('#button');
-  } finally {
-    await browser.close();
-  }
-}
+```
+$ yarn start
 ```
 
-## Features
+This command starts a local development server and opens up a browser window. Most changes are reflected live without having to restart the server.
 
-- LLM-powered browser automation
-- Multi-tab support
-- Built on reliable technologies (Playwright, LangChain)
-- TypeScript support
-- Modern async/await API
+### Build
 
-## Contributing
+```
+$ yarn build
+```
 
-Please see our [Contributing Guide](../CONTRIBUTING.md) for details on how to:
-- Set up the development environment
-- Run tests
-- Submit pull requests
-- Add new features
+This command generates static content into the `build` directory and can be served using any static contents hosting service.
 
-## Support
+### Deployment
 
-- [GitHub Issues](https://github.com/browser-use/browser-use-node/issues)
-- [Discord Community](https://link.browser-use.com/discord)
+Using SSH:
 
-## License
+```
+$ USE_SSH=true yarn deploy
+```
 
-This project is licensed under the MIT License - see the [LICENSE](../LICENSE) file for details.
+Not using SSH:
+
+```
+$ GIT_USER=<Your GitHub username> yarn deploy
+```
+
+If you are using GitHub pages for hosting, this command is a convenient way to build the website and push to the `gh-pages` branch.

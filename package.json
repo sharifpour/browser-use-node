@@ -20,7 +20,13 @@
 		"test:smoke": "bun test tests/smoke/smoke.test.ts",
 		"deploy:staging": "node scripts/deploy.js staging",
 		"deploy:production": "node scripts/deploy.js production",
-		"type-check": "bun tsc --noEmit"
+		"type-check": "bun tsc --noEmit",
+		"docs:dev": "cd docs && bun run start",
+		"docs:build": "cd docs && bun run build",
+		"docs:serve": "cd docs && bun run serve",
+		"docs:clear": "cd docs && bun run clear",
+		"docs:generate-api": "typedoc --out docs/docs/api src/index.ts --skipErrorChecking --excludeExternals --excludePrivate --plugin typedoc-plugin-markdown",
+		"docs": "bun run docs:generate-api && bun run docs:build && bun run docs:serve"
 	},
 	"files": ["dist", "README.md", "LICENSE"],
 	"keywords": [

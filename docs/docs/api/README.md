@@ -1,3 +1,7 @@
+**browser-use-node**
+
+***
+
 # browser-use-node
 
 Browser automation powered by LLMs in JavaScript/TypeScript.
@@ -6,7 +10,7 @@ Browser automation powered by LLMs in JavaScript/TypeScript.
 > This library is currently under heavy development and **NOT READY FOR PRODUCTION USE**.
 > The API is unstable and subject to major changes.
 >
-> If you'd like to help develop this library, please check out [port-diff.md](./port-diff.md) which outlines the current development priorities and areas where help is needed.
+> If you'd like to help develop this library, please check out [port-diff.md](_media/port-diff.md) which outlines the current development priorities and areas where help is needed.
 
 ## Overview
 
@@ -237,8 +241,8 @@ bun run docs:generate-api
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guidelines](./CONTRIBUTING.md) for details on how to get started and our development process. By participating in this project, you agree to abide by our [Code of Conduct](./CODE_OF_CONDUCT.md).
+We welcome contributions! Please see our [Contributing Guidelines](_media/CONTRIBUTING.md) for details on how to get started and our development process. By participating in this project, you agree to abide by our [Code of Conduct](_media/CODE_OF_CONDUCT.md).
 
 ## Security
 
-We take security seriously. If you discover a security vulnerability, please follow our [Security Policy](./SECURITY.md) for responsible disclosure.
+We take security seriously. If you discover a security vulnerability, please follow our [Security Policy](_media/SECURITY.md) for responsible disclosure.
