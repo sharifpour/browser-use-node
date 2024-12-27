@@ -2,12 +2,12 @@
  * Playwright browser on steroids.
  */
 
-import { type Browser as PlaywrightBrowser, chromium } from "playwright";
-import { BrowserContext } from "./context";
-import type { BrowserContextConfig } from "./config";
-import { logger } from "../utils/logger";
 import axios from "axios";
-import { spawn } from "child_process";
+import { spawn } from "node:child_process";
+import { type Browser as PlaywrightBrowser, chromium } from "playwright";
+import { logger } from "../utils/logger";
+import type { BrowserContextConfig } from "./config";
+import { BrowserContext } from "./context";
 
 export interface ProxySettings {
 	server: string;
