@@ -9,11 +9,13 @@ import { dirname } from "node:path";
 import type { Browser as PlaywrightBrowser, ConsoleMessage, Cookie, Dialog, ElementHandle, FileChooser, Frame, Page, BrowserContext as PlaywrightContext, Request, Response, Route, WebSocket, Worker } from "playwright";
 import { v4 as uuidv4 } from 'uuid';
 import { DOMService } from "../dom/service";
-import type { DOMElementNode } from "../dom/types";
+import { type DOMElementNode, type DOMState, type DOMQueryOptions, type ElementSelector, type BrowserSession } from "./types";
+import { DOMObserverManager, type MutationEvent } from "../dom/mutation-observer";
+import { convertDOMElementToHistoryElement, findHistoryElementInTree } from "../dom/tree-processor";
 import { logger } from '../utils/logger';
 import type { Browser } from "./browser";
 import type { BrowserContextConfig } from "./config";
-import type { BrowserSession, BrowserState, BrowserStateHistory, TabInfo as BrowserTabInfo } from "./types";
+import type { BrowserState, BrowserStateHistory, TabInfo as BrowserTabInfo } from "./types";
 
 const DEFAULT_CONFIG: BrowserContextConfig = {
 	minimumWaitPageLoadTime: 0.5,
@@ -98,6 +100,10 @@ interface SecurityService {
 	getCookieOptions: () => { secure: boolean; httpOnly: boolean; sameSite: 'Strict' | 'Lax' | 'None' };
 }
 
+interface EventLoop {
+	unref: () => void;
+}
+
 /**
  * Browser context with enhanced capabilities
  */
@@ -155,7 +161,7 @@ export class BrowserContext {
 	/**
 	 * Async context manager exit
 	 */
-	async exit(error?: Error): Promise<void> {
+	async exit(_error?: Error): Promise<void> {
 		await this.close();
 	}
 
@@ -164,13 +170,14 @@ export class BrowserContext {
 	 */
 	private async _initializeSession(): Promise<BrowserSession> {
 		if (this.isInitialized) {
-			return this.session as BrowserSession;
+			const session = await this.getSession();
+			return session;
 		}
 
 		logger.debug('Initializing browser context');
 
 		const playwrightBrowser = await this.browser.getPlaywrightBrowser();
-		const context = await this._createContext(playwrightBrowser);
+		const context = await this.createContext(playwrightBrowser);
 		const page = await context.newPage();
 
 		// Create initial empty state
@@ -183,7 +190,12 @@ export class BrowserContext {
 				isVisible: true,
 				xpath: '',
 				attributes: {},
-				children: []
+				children: [],
+				isInteractive: false,
+				isTopElement: true,
+				shadowRoot: false,
+				isClickable: false,
+				parent: null
 			},
 			clickableElements: [],
 			selectorMap: {},
@@ -302,14 +314,17 @@ export class BrowserContext {
 			logger.debug('BrowserContext was not properly closed before destruction');
 			try {
 				// Try to get running event loop
-				let loop: any;
+				let loop: EventLoop[] | undefined;
 				try {
-					loop = (global as any).process._getActiveHandles?.();
+					const processHandles = (global as { process?: { _getActiveHandles?: () => EventLoop[] } }).process?._getActiveHandles?.();
+					if (processHandles && processHandles.length > 0) {
+						loop = processHandles;
+					}
 				} catch {
 					// Ignore error
 				}
 
-				if (loop?.length > 0) {
+				if (loop && loop.length > 0) {
 					// Event loop is running, create task
 					loop[0].unref();
 					await this.close();
@@ -318,7 +333,7 @@ export class BrowserContext {
 					await this.close();
 				}
 			} catch (error) {
-				logger.warning(`Failed to force close browser context: ${error}`);
+				logger.warn(`Failed to force close browser context: ${error}`);
 			}
 		}
 	}
@@ -656,13 +671,13 @@ export class BrowserContext {
 
 			// Filter out requests with certain headers
 			const headers = request.headers();
-			if (headers['purpose'] === 'prefetch' || headers['sec-fetch-dest'] === 'video' || headers['sec-fetch-dest'] === 'audio') {
+			if (headers.purpose === 'prefetch' || headers['sec-fetch-dest'] === 'video' || headers['sec-fetch-dest'] === 'audio') {
 				return;
 			}
 
-			pendingRequests.add(request);
-			lastActivity = Date.now() / 1000;
-			logger.debug(`Request started: ${request.url()} (${request.resourceType()})`);
+				pendingRequests.add(request);
+				lastActivity = Date.now() / 1000;
+				logger.debug(`Request started: ${request.url()} (${request.resourceType()})`);
 		};
 
 		const onResponse = async (response: Response) => {
@@ -697,7 +712,7 @@ export class BrowserContext {
 
 			// Skip if response is too large (likely not essential for page load)
 			const contentLength = response.headers()['content-length'];
-			if (contentLength && parseInt(contentLength) > 5 * 1024 * 1024) { // 5MB
+			if (contentLength && Number.parseInt(contentLength, 10) > 5 * 1024 * 1024) { // 5MB
 				pendingRequests.delete(request);
 				return;
 			}
@@ -752,13 +767,13 @@ export class BrowserContext {
 		try {
 			await this.waitForStableNetwork();
 		} catch (error) {
-			logger.warning('Page load failed, continuing...', error);
+			logger.warn('Page load failed, continuing...', error);
 		}
 
 		// Calculate remaining time to meet minimum wait time
 		const elapsed = Date.now() / 1000 - startTime;
 		const remaining = Math.max(
-			(timeoutOverwrite ?? this.config.minimumWaitPageLoadTime || 0.5) - elapsed,
+			((timeoutOverwrite ?? this.config.minimumWaitPageLoadTime) || 0.5) - elapsed,
 			0
 		);
 
@@ -968,7 +983,6 @@ export class BrowserContext {
 
 		// Clear any cached state
 		this.session = {
-			...this.session!,
 			cachedState: {
 				selectorMap: {}
 			}
@@ -1010,11 +1024,11 @@ export class BrowserContext {
 	/**
 	 * Execute JavaScript code on the page with proper error handling and timeout
 	 */
-	public async executeJavaScript<T>(
+	public async executeJavaScript<T, Args extends unknown[] = unknown[]>(
 		script: string,
 		options: {
 			timeout?: number;
-			args?: any[];
+			args?: Args;
 			returnByValue?: boolean;
 		} = {}
 	): Promise<T> {
@@ -1030,10 +1044,9 @@ export class BrowserContext {
 			});
 
 			// Create the evaluation promise
-			const evaluationPromise = page.evaluate<T, any[]>(
+			const evaluationPromise = page.evaluate<T, Args>(
 				(script, ...args) => {
 					try {
-						// Use Function constructor to create a function from the script
 						const scriptFn = new Function('...args', script);
 						return scriptFn(...args);
 					} catch (error) {
@@ -1264,11 +1277,10 @@ export class BrowserContext {
 	 */
 	public async getLocateElement(element: DOMElementNode): Promise<ElementHandle | null> {
 		const page = await this.getPage();
-		const currentFrame: Page | FrameLocator = page;
 
 		try {
 			// Try XPath first if available
-			if (element.xpath) {
+			if (element.xpath && element.xpath.trim()) {
 				const simpleSelector = this._convertSimpleXPathToCssSelector(element.xpath);
 				if (simpleSelector) {
 					const elementHandle = await page.$(simpleSelector);
@@ -1315,7 +1327,10 @@ export class BrowserContext {
 					// Check for shadow root
 					const shadowRoot = await element.evaluateHandle(el => el.shadowRoot);
 					if (shadowRoot.asElement()) {
-						context = shadowRoot.asElement()!;
+						const element = shadowRoot.asElement();
+						if (element) {
+							context = element;
+						}
 					} else {
 						context = element;
 					}
@@ -1877,7 +1892,12 @@ export class BrowserContext {
 				};
 
 				// Store wrapper function for cleanup
-				const pageWithWrappers = page as Page & { __eventWrappers?: Record<string, Function> };
+				type EventWrapperCallback = (...args: unknown[]) => Promise<void>;
+				interface PageWithWrappers extends Page {
+					__eventWrappers?: Record<string, EventWrapperCallback>;
+				}
+
+				const pageWithWrappers = page as PageWithWrappers;
 				pageWithWrappers.__eventWrappers = pageWithWrappers.__eventWrappers || {};
 				pageWithWrappers.__eventWrappers[eventType] = wrapperFn;
 
@@ -2049,5 +2069,40 @@ export class BrowserContext {
 			await this.init();
 		}
 		return this.context;
+	}
+
+	/**
+	 * Get the current page
+	 */
+	private async getPage(): Promise<Page> {
+		if (!this.currentPage) {
+			if (!this.context) {
+				throw new Error('Browser context not initialized');
+			}
+			this.currentPage = await this.context.newPage();
+		}
+		return this.currentPage;
+	}
+
+	/**
+	 * Remove highlights from the page
+	 */
+	private async removeHighlights(): Promise<void> {
+		const page = await this.getPage();
+		await page.evaluate(() => {
+			const highlights = document.querySelectorAll('[highlight]');
+			highlights.forEach(el => el.removeAttribute('highlight'));
+		});
+	}
+
+	/**
+	 * Add new page listener
+	 */
+	private async _addNewPageListener(context: PlaywrightContext): Promise<void> {
+		context.on('page', async page => {
+			// Handle new page creation
+			this.currentPage = page;
+			await this.removeHighlights();
+		});
 	}
 }

@@ -25,28 +25,22 @@ export const ENV_VARS = {
 /**
  * Configuration file schema
  */
-export const ConfigFileSchema = z.object({
-    browser: BrowserConfigSchema.optional(),
-    context: z.object({
-        minimumWaitPageLoadTime: z.number().optional(),
-        waitForNetworkIdlePageLoadTime: z.number().optional(),
-        maximumWaitPageLoadTime: z.number().optional(),
-        waitBetweenActions: z.number().optional(),
-        disableSecurity: z.boolean().optional(),
-        browserWindowSize: z.object({
-            width: z.number(),
-            height: z.number()
-        }).optional(),
-        noViewport: z.boolean().optional(),
-        saveRecordingPath: z.string().optional(),
-        tracePath: z.string().optional(),
-        saveScreenshots: z.boolean().optional()
-    }).optional(),
-    logging: z.object({
-        level: z.enum(['debug', 'info', 'warn', 'error']).optional(),
-        file: z.string().optional(),
-        console: z.boolean().optional()
-    }).optional()
+export type ConfigFileSchemaType = z.infer<typeof ConfigFileSchema>;
+
+export const ConfigFileSchema: z.ZodObject<{
+  browserPath: z.ZodString;
+  userDataDir: z.ZodString;
+  defaultViewport: z.ZodObject<{
+    width: z.ZodNumber;
+    height: z.ZodNumber;
+  }>;
+}> = z.object({
+  browserPath: z.string(),
+  userDataDir: z.string(),
+  defaultViewport: z.object({
+    width: z.number(),
+    height: z.number()
+  })
 });
 
 export type ConfigFile = z.infer<typeof ConfigFileSchema>;

@@ -2,9 +2,9 @@
  * Service for DOM operations
  */
 
-import type { Page, ElementHandle, Frame } from "playwright";
-import type { DOMElementNode, DOMState, DOMQueryOptions, ElementSelector, DOMBaseNode, DOMHistoryElement, DOMObservation } from "./types";
-import { DOMObserverManager, MutationEvent } from "./mutation-observer";
+import { type Page, type ElementHandle, type Frame } from "playwright";
+import { type DOMElementNode, type DOMState, type DOMQueryOptions, type ElementSelector } from "./types";
+import { DOMObserverManager, type MutationEvent } from "./mutation-observer";
 import { convertDOMElementToHistoryElement, findHistoryElementInTree } from "./tree-processor";
 import type { HashedDomElement } from './tree-processor';
 
@@ -296,13 +296,12 @@ export class DOMService {
 				/upload|choose file|select file|drop file/i.test(el.textContent || '') ||
 
 				// Check for file-related event listeners
-				(window as { _eventListeners?: Map<Element, { toString(): string }[]> })._eventListeners?.get(el)?.some(listener =>
+				(window as any)._eventListeners?.get(el)?.some(listener =>
 					/file|upload|drop/i.test(listener.toString())
 				)
 			);
 
 			if (isCustomUploader) {
-				// Try to find associated file input
 				const fileInput = el.querySelector('input[type="file"]') as HTMLInputElement;
 				return {
 					isUploader: true,
@@ -317,8 +316,8 @@ export class DOMService {
 			return {
 				isUploader: false,
 				type: null,
-					multiple: false,
-					acceptTypes: []
+				multiple: false,
+				acceptTypes: []
 			};
 		});
 	}
@@ -443,15 +442,12 @@ export class DOMService {
 			for (const file of files) {
 				const isAccepted = uploaderInfo.acceptTypes.some(accept => {
 					if (accept.startsWith('.')) {
-						// File extension
 						return file.name.toLowerCase().endsWith(accept.toLowerCase());
 					} else if (accept.includes('/*')) {
-						// MIME type with wildcard
 						const [acceptType, acceptSubtype] = accept.split('/');
 						const [fileType, fileSubtype] = file.mimeType.split('/');
 						return acceptType === fileType && (acceptSubtype === '*' || acceptSubtype === fileSubtype);
 					} else {
-						// Exact MIME type
 						return accept === file.mimeType;
 					}
 				});
@@ -463,8 +459,7 @@ export class DOMService {
 		}
 
 		if (uploaderInfo.type === 'native' || uploaderInfo.type === 'custom') {
-			// For native and custom uploaders, use the file input
-			const fileInput = await element.evaluateHandle(el => {
+			const fileInput = await element.evaluateHandle((el: HTMLElement) => {
 				if (el.tagName.toLowerCase() === 'input') {
 					return el;
 				}
@@ -475,16 +470,20 @@ export class DOMService {
 				throw new Error('Could not find file input element');
 			}
 
-			await fileInput.asElement()?.setInputFiles(files.map(file => ({
+			const inputElement = fileInput.asElement();
+			if (!inputElement) {
+				throw new Error('Could not convert handle to element');
+			}
+
+			await inputElement.setInputFiles(files.map(file => ({
 				name: file.name,
 				mimeType: file.mimeType,
 				buffer: file.buffer
 			})));
 		} else if (uploaderInfo.type === 'dragdrop' && simulateDragDrop) {
-			// For drag-drop zones, simulate drag and drop events
-			await element.evaluate((el, fileList) => {
+			await element.evaluate((el: HTMLElement, fileList: Array<{ name: string; mimeType: string; buffer: Buffer }>) => {
 				const dt = new DataTransfer();
-				fileList.forEach((file: any) => {
+				fileList.forEach(file => {
 					const f = new File([file.buffer], file.name, { type: file.mimeType });
 					dt.items.add(f);
 				});
@@ -518,35 +517,38 @@ export class DOMService {
 	/**
 	 * Convert DOM element to history element
 	 */
-	convertToHistoryElement(element: unknown) {
-		return convertDOMElementToHistoryElement(element);
+	public convertToHistoryElement(element: unknown): DOMElementNode {
+		if (!element || typeof element !== 'object') {
+			throw new Error('Invalid element provided');
+		}
+		return convertDOMElementToHistoryElement(element as DOMElementNode);
 	}
 
 	/**
 	 * Find history element in tree
 	 */
-	findHistoryElement(element: DOMElementNode, tree: DOMElementNode) {
+	public findHistoryElement(element: DOMElementNode, tree: DOMElementNode): DOMElementNode | null {
 		return findHistoryElementInTree(element, tree);
 	}
 
 	/**
 	 * Get element by XPath
 	 */
-	async getElementByXPath(xpath: string): Promise<DOMElementNode | null> {
+	public async getElementByXPath(xpath: string): Promise<DOMElementNode | null> {
 		return this.findElement({ xpath });
 	}
 
 	/**
 	 * Get elements by XPath
 	 */
-	async getElementsByXPath(xpath: string): Promise<DOMElementNode[]> {
+	public async getElementsByXPath(xpath: string): Promise<DOMElementNode[]> {
 		return this.findElements({ xpath });
 	}
 
 	/**
 	 * Get element by index
 	 */
-	async getElementByIndex(index: number): Promise<DOMElementNode | null> {
+	public async getElementByIndex(index: number): Promise<DOMElementNode | null> {
 		const state = await this.getState();
 		return state.selectorMap[index] || null;
 	}
@@ -554,7 +556,7 @@ export class DOMService {
 	/**
 	 * Get clickable elements
 	 */
-	async getClickableElements(): Promise<DOMElementNode[]> {
+	public async getClickableElements(): Promise<DOMElementNode[]> {
 		const state = await this.getState();
 		return state.clickableElements;
 	}
@@ -562,15 +564,15 @@ export class DOMService {
 	/**
 	 * Get DOM tree
 	 */
-	async getDOMTree(): Promise<DOMElementNode> {
+	public async getDOMTree(): Promise<DOMElementNode> {
 		const state = await this.getState();
-		return state.tree;
+		return state.elementTree[0];
 	}
 
 	/**
 	 * Get selector map
 	 */
-	async getSelectorMap(): Promise<Record<number, DOMElementNode>> {
+	public async getSelectorMap(): Promise<Record<number, DOMElementNode>> {
 		const state = await this.getState();
 		return state.selectorMap;
 	}
@@ -579,22 +581,23 @@ export class DOMService {
 	 * Query selector with shadow DOM support
 	 */
 	public async querySelectorDeep(selector: string): Promise<ElementHandle | null> {
-		return this.page.evaluateHandle((sel) => {
+		return this.page.evaluateHandle((sel: string) => {
 			function queryDeep(root: Document | ShadowRoot, selector: string): Element | null {
-				// Try to find in current root
-				const element = root.querySelector(selector);
-				if (element) return element;
+				try {
+					const element = root.querySelector(selector);
+					if (element) return element;
 
-				// Search in shadow roots
-				const shadows = Array.from(root.querySelectorAll('*'))
-					.map(el => el.shadowRoot)
-					.filter((shadow): shadow is ShadowRoot => shadow !== null);
+					const shadows = Array.from(root.querySelectorAll('*'))
+						.map(el => el.shadowRoot)
+						.filter((shadow): shadow is ShadowRoot => shadow !== null);
 
-				for (const shadow of shadows) {
-					const found = queryDeep(shadow, selector);
-					if (found) return found;
+					for (const shadow of shadows) {
+						const found = queryDeep(shadow, selector);
+						if (found) return found;
+					}
+				} catch (error) {
+					console.error('Error in queryDeep:', error);
 				}
-
 				return null;
 			}
 

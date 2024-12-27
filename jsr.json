@@ -1,0 +1,14 @@
+{
+  "name": "@browser-use/browser-use-node",
+  "version": "0.1.0",
+  "license": "MIT",
+  "exports": "./src/index.ts",
+  "author": "dankovk <dankov.kiev@gmail.com>",
+  "type": "module",
+  "scripts": {
+    "build": "bun build ./src/index.ts --outdir ./dist --target bun"
+  },
+  "devDependencies": {
+    "bun": "^1.1.22"
+  }
+}

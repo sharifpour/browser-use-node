@@ -4,53 +4,68 @@ import type { ChatOpenAI } from 'langchain/chat_models/openai';
 /**
  * Browser configuration schema with validation
  */
-export const BrowserConfigSchema = z.object({
-	/** Whether to run the browser in headless mode */
-	headless: z.boolean().optional().default(false),
-	/** Whether to disable browser security features */
-	disableSecurity: z.boolean().optional().default(true),
-	/** Additional Chromium arguments */
-	extraChromiumArgs: z.array(z.string()).optional().default([]),
-	/** Path to Chrome instance for connecting to normal browser */
-	chromeInstancePath: z.string().optional(),
-	/** WebSocket URL for connecting to browser */
-	wssUrl: z.string().optional(),
-	/** Proxy settings */
-	proxy: z.object({
-		server: z.string(),
-		bypass: z.string().optional(),
-		username: z.string().optional(),
-		password: z.string().optional()
-	}).optional(),
-	/** Default configuration for new browser contexts */
-	newContextConfig: z.object({
-		/** Path to cookies file for persistence */
-		cookiesFile: z.string().optional(),
-		/** Minimum time to wait for page load in seconds */
-		minimumWaitPageLoadTime: z.number().optional().default(0.5),
-		/** Time to wait for network idle in seconds */
-		waitForNetworkIdlePageLoadTime: z.number().optional().default(1.0),
-		/** Maximum time to wait for page load in seconds */
-		maximumWaitPageLoadTime: z.number().optional().default(5.0),
-		/** Time to wait between actions in seconds */
-		waitBetweenActions: z.number().optional().default(1.0),
-		/** Browser window size */
-		browserWindowSize: z.object({
-			width: z.number(),
-			height: z.number()
-		}).optional().default({ width: 1280, height: 1100 }),
-		/** Whether to disable viewport */
-		noViewport: z.boolean().optional().default(false),
-		/** Path to save video recordings */
-		saveRecordingPath: z.string().optional(),
-		/** Path to save trace files */
-		tracePath: z.string().optional(),
-		/** Whether to save screenshots */
-		saveScreenshots: z.boolean().optional().default(false)
-	}).optional()
+export type BrowserConfigSchemaType = z.infer<typeof BrowserConfigSchema>;
+
+export const BrowserConfigSchema: z.ZodObject<{
+	executablePath: z.ZodString;
+	args: z.ZodArray<z.ZodString>;
+	headless: z.ZodBoolean;
+	defaultViewport: z.ZodObject<{
+		width: z.ZodNumber;
+		height: z.ZodNumber;
+	}>;
+}> = z.object({
+	executablePath: z.string(),
+	args: z.array(z.string()),
+	headless: z.boolean(),
+	defaultViewport: z.object({
+		width: z.number(),
+		height: z.number()
+	})
 });
 
 export type BrowserConfig = z.infer<typeof BrowserConfigSchema>;
+
+/**
+ * DOM Element Node interface
+ */
+export interface DOMElementNode {
+	tagName: string;
+	isVisible: boolean;
+	xpath: string;
+	attributes: Record<string, string>;
+	children: DOMElementNode[];
+	isInteractive: boolean;
+	isTopElement: boolean;
+	shadowRoot: boolean;
+	isClickable: boolean;
+	parent: DOMElementNode | null;
+	highlightIndex?: number;
+}
+
+/**
+ * DOM Query Options interface
+ */
+export interface DOMQueryOptions {
+	waitForVisible: boolean;
+	waitForEnabled: boolean;
+	timeout: number;
+	includeInvisible: boolean;
+}
+
+/**
+ * DOM State interface
+ */
+export interface DOMState {
+	elementTree: DOMElementNode[];
+	clickableElements: DOMElementNode[];
+	selectorMap: Record<number, DOMElementNode>;
+}
+
+/**
+ * Element Selector type
+ */
+export type ElementSelector = string | { xpath: string } | { css: string };
 
 /**
  * Agent configuration schema with validation

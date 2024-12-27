@@ -425,8 +425,8 @@ export class Controller {
 	/**
 	 * Register a custom action
 	 */
-	public action(description: string, func: ActionFunction, options: { paramModel?: z.ZodType<unknown>; requiresBrowser?: boolean } = {}) {
-		return this.registry.action(description, func, options);
+	public action(description: string, func: ActionFunction, options: { paramModel?: z.ZodType<unknown>; requiresBrowser?: boolean } = {}): void {
+		this.registry.action(description, func, options);
 	}
 
 	/**
