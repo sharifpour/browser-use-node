@@ -18,6 +18,8 @@ We take the security of browser-use-node seriously. If you believe you have foun
 
 ## What to Expect
 
+
+
 When you report a vulnerability:
 
 1. You will receive an acknowledgment within 48 hours
