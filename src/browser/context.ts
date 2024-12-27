@@ -8,14 +8,14 @@ import * as path from 'node:path';
 import { dirname } from "node:path";
 import type { Browser as PlaywrightBrowser, ConsoleMessage, Cookie, Dialog, ElementHandle, FileChooser, Frame, Page, BrowserContext as PlaywrightContext, Request, Response, Route, WebSocket, Worker } from "playwright";
 import { v4 as uuidv4 } from 'uuid';
-import { DOMService } from "../dom/service";
-import { type DOMElementNode, type DOMState, type DOMQueryOptions, type ElementSelector, type BrowserSession } from "./types";
-import { DOMObserverManager, type MutationEvent } from "../dom/mutation-observer";
-import { convertDOMElementToHistoryElement, findHistoryElementInTree } from "../dom/tree-processor";
+import type { DOMService } from "../dom/service";
+import type { BrowserSession } from "./types";
 import { logger } from '../utils/logger';
 import type { Browser } from "./browser";
 import type { BrowserContextConfig } from "./config";
-import type { BrowserState, BrowserStateHistory, TabInfo as BrowserTabInfo } from "./types";
+import { DOMObserverManager, type MutationEvent } from "../dom/mutation-observer";
+import { convertDOMElementToHistoryElement, findHistoryElementInTree } from "../dom/tree-processor";
+import { BrowserState, BrowserStateHistory, TabInfo as BrowserTabInfo } from "./types";
 
 const DEFAULT_CONFIG: BrowserContextConfig = {
 	minimumWaitPageLoadTime: 0.5,
@@ -584,9 +584,9 @@ export class BrowserContext {
 	 */
 	private async waitForStableNetwork(): Promise<void> {
 		const page = await this.getPage();
-
 		const pendingRequests = new Set<Request>();
 		let lastActivity = Date.now() / 1000;
+		let shouldContinue = true;
 
 		// Define relevant resource types and content types
 		const RELEVANT_RESOURCE_TYPES = new Set([
@@ -729,21 +729,21 @@ export class BrowserContext {
 		try {
 			// Wait for idle time
 			const startTime = Date.now() / 1000;
-			while (true) {
+			while (shouldContinue) {
 				await new Promise(resolve => setTimeout(resolve, 100));
 				const now = Date.now() / 1000;
 				if (
 					pendingRequests.size === 0 &&
 					(now - lastActivity) >= (this.config.waitForNetworkIdlePageLoadTime || 1.0)
 				) {
-					break;
+					shouldContinue = false;
 				}
 				if (now - startTime > (this.config.maximumWaitPageLoadTime || 5.0)) {
 					logger.debug(
 						`Network timeout after ${this.config.maximumWaitPageLoadTime}s with ${pendingRequests.size} ` +
 							`pending requests: ${[...pendingRequests].map(r => r.url())}`
 					);
-					break;
+					shouldContinue = false;
 				}
 			}
 		} finally {
@@ -1222,7 +1222,7 @@ export class BrowserContext {
 			// Add classes if present
 			const classes = element.attributes.class?.split(/\s+/).filter(Boolean);
 			if (classes?.length) {
-				cssSelector += classes.map(c => `.${CSS.escape(c)}`).join('');
+				cssSelector += classes.map((c: string) => `.${CSS.escape(c)}`).join('');
 				specificity += classes.length * 10;
 			}
 
@@ -1236,16 +1236,17 @@ export class BrowserContext {
 				});
 
 			for (const [attribute, value] of attributeEntries) {
-				if (!value.trim()) continue;
+				const strValue = String(value);
+				if (!strValue.trim()) continue;
 
 				const safeAttribute = attribute.replace(':', '\\:');
-				if (value === '') {
+				if (strValue === '') {
 					cssSelector += `[${safeAttribute}]`;
-				} else if (/["'<>`]/.test(value)) {
-					const safeValue = value.replace(/"/g, '\\"');
+				} else if (/["'<>`]/.test(strValue)) {
+					const safeValue = strValue.replace(/"/g, '\\"');
 					cssSelector += `[${safeAttribute}*="${safeValue}"]`;
 				} else {
-					cssSelector += `[${safeAttribute}="${value}"]`;
+					cssSelector += `[${safeAttribute}="${strValue}"]`;
 				}
 				specificity += 1;
 
@@ -1256,7 +1257,7 @@ export class BrowserContext {
 			// Add structural selectors if needed
 			if (specificity < 10 && element.parent) {
 				const siblings = element.parent.children.filter(
-					child => child.tagName === element.tagName
+					(child: DOMElementNode) => child.tagName === element.tagName
 				);
 				if (siblings.length > 1) {
 					const index = siblings.indexOf(element) + 1;
@@ -1275,12 +1276,12 @@ export class BrowserContext {
 	/**
 	 * Get element handle with enhanced location strategy
 	 */
-	public async getLocateElement(element: DOMElementNode): Promise<ElementHandle | null> {
+	public async getLocateElement(element: DOMElementNode): Promise<ElementHandle<Element> | null> {
 		const page = await this.getPage();
 
 		try {
 			// Try XPath first if available
-			if (element.xpath && element.xpath.trim()) {
+			if (element.xpath?.trim()) {
 				const simpleSelector = this._convertSimpleXPathToCssSelector(element.xpath);
 				if (simpleSelector) {
 					const elementHandle = await page.$(simpleSelector);
@@ -1308,7 +1309,7 @@ export class BrowserContext {
 			parents.reverse();
 
 			// Handle shadow DOM and iframe traversal
-			let context: ElementHandle | Page = page;
+			let context: ElementHandle<Element> | Page = page;
 			for (const parent of parents) {
 				const parentSelector = this._enhancedCssSelectorForElement(parent);
 
@@ -1325,12 +1326,10 @@ export class BrowserContext {
 					if (!element) break;
 
 					// Check for shadow root
-					const shadowRoot = await element.evaluateHandle(el => el.shadowRoot);
-					if (shadowRoot.asElement()) {
-						const element = shadowRoot.asElement();
-						if (element) {
-							context = element;
-						}
+					const shadowRoot = await element.evaluateHandle((el: Element) => el.shadowRoot);
+					const shadowElement = shadowRoot.asElement();
+					if (shadowElement) {
+						context = shadowElement;
 					} else {
 						context = element;
 					}
@@ -1868,7 +1867,7 @@ export class BrowserContext {
 				this.eventHandlers[eventType] = [];
 
 				// Create wrapper function to handle timeouts and errors
-				const wrapperFn = async (...args: Parameters<PageEventHandler[T]>) => {
+				const wrapperFn: EventWrapperCallback<T> = async (...args: Parameters<PageEventHandler[T]>) => {
 					const handlers = this.eventHandlers[eventType] || [];
 					for (const handler of handlers) {
 						try {
@@ -1892,11 +1891,6 @@ export class BrowserContext {
 				};
 
 				// Store wrapper function for cleanup
-				type EventWrapperCallback = (...args: unknown[]) => Promise<void>;
-				interface PageWithWrappers extends Page {
-					__eventWrappers?: Record<string, EventWrapperCallback>;
-				}
-
 				const pageWithWrappers = page as PageWithWrappers;
 				pageWithWrappers.__eventWrappers = pageWithWrappers.__eventWrappers || {};
 				pageWithWrappers.__eventWrappers[eventType] = wrapperFn;
@@ -1939,11 +1933,11 @@ export class BrowserContext {
 	public async removeAllEventListeners(eventType: PageEventType): Promise<void> {
 		try {
 			const page = await this.getPage();
-			const pageWithWrappers = page as Page & { __eventWrappers?: Record<string, Function> };
+			const pageWithWrappers = page as PageWithWrappers;
 			const wrapper = pageWithWrappers.__eventWrappers?.[eventType];
 
 			if (wrapper) {
-				page.removeListener(eventType, wrapper);
+				page.off(eventType, wrapper);
 				delete pageWithWrappers.__eventWrappers?.[eventType];
 			}
 
@@ -1959,13 +1953,13 @@ export class BrowserContext {
 	public async clearAllEventListeners(): Promise<void> {
 		try {
 			const page = await this.getPage();
-			const pageWithWrappers = page as Page & { __eventWrappers?: Record<string, Function> };
+			const pageWithWrappers = page as PageWithWrappers;
 
 			// Remove all event listeners from page
 			for (const eventType of Object.keys(this.eventHandlers) as PageEventType[]) {
 				const wrapper = pageWithWrappers.__eventWrappers?.[eventType];
 				if (wrapper) {
-					page.removeListener(eventType, wrapper);
+					page.off(eventType, wrapper);
 				}
 			}
 
@@ -2091,7 +2085,9 @@ export class BrowserContext {
 		const page = await this.getPage();
 		await page.evaluate(() => {
 			const highlights = document.querySelectorAll('[highlight]');
-			highlights.forEach(el => el.removeAttribute('highlight'));
+			for (const el of highlights) {
+				el.removeAttribute('highlight');
+			}
 		});
 	}
 
