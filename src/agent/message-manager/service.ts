@@ -126,6 +126,12 @@ export class MessageManager {
 			throw new Error(`Invalid action format at index ${index}: missing or invalid action`);
 		}
 
+		// Block invalid actions
+		if (action.action === 'open_new_tab') {
+			logger.error(`Invalid action at index ${index}: open_new_tab is not supported`, action);
+			throw new Error(`Invalid action at index ${index}: open_new_tab is not supported, use go_to_url instead`);
+		}
+
 		// Validate args
 		if (typeof action.args !== 'object' || !action.args) {
 			logger.error(`Missing or invalid args at index ${index}:`, action);
@@ -134,12 +140,23 @@ export class MessageManager {
 
 		// Validate specific actions
 		switch (action.action) {
-			case 'go_to_url':
-				if (typeof (action.args as Record<string, unknown>).url !== 'string') {
+			case 'go_to_url': {
+				const url = (action.args as Record<string, unknown>).url;
+				if (typeof url !== 'string') {
 					logger.error(`Missing or invalid URL for go_to_url at index ${index}:`, action);
 					throw new Error(`Invalid action format at index ${index}: go_to_url requires a URL string`);
 				}
+				try {
+					new URL(url); // Validate URL format
+					if (!url.startsWith('http://') && !url.startsWith('https://')) {
+						throw new Error('URL must start with http:// or https://');
+					}
+				} catch (error) {
+					logger.error(`Invalid URL format for go_to_url at index ${index}:`, { url, error });
+					throw new Error(`Invalid action format at index ${index}: ${error instanceof Error ? error.message : String(error)}`);
+				}
 				break;
+			}
 			case 'click_element':
 				if (typeof (action.args as Record<string, unknown>).index !== 'number') {
 					logger.error(`Missing or invalid index for click_element at index ${index}:`, action);
@@ -153,6 +170,24 @@ export class MessageManager {
 					throw new Error(`Invalid action format at index ${index}: input_text requires index and text`);
 				}
 				break;
+			case 'extract_text':
+				if (typeof (action.args as Record<string, unknown>).index !== 'number') {
+					logger.error(`Missing or invalid index for extract_text at index ${index}:`, action);
+					throw new Error(`Invalid action format at index ${index}: extract_text requires an index number`);
+				}
+				break;
+			case 'extract_page_content':
+				// No args required
+				break;
+			case 'done':
+				if (typeof (action.args as Record<string, unknown>).result !== 'string') {
+					logger.error(`Missing or invalid result for done at index ${index}:`, action);
+					throw new Error(`Invalid action format at index ${index}: done requires a result string`);
+				}
+				break;
+			default:
+				logger.error(`Unknown action type at index ${index}:`, action);
+				throw new Error(`Invalid action format at index ${index}: unknown action type ${action.action}`);
 		}
 	}
 

@@ -30,9 +30,13 @@ export class SystemPrompt {
 
 2. ACTIONS: You can specify multiple actions to be executed in sequence.
 
+   IMPORTANT: For navigation, ALWAYS use the full URL including https://:
+   - To go to Google: {"type": "browser", "action": "go_to_url", "args": {"url": "https://www.google.com"}}
+   - To go to Amazon: {"type": "browser", "action": "go_to_url", "args": {"url": "https://www.amazon.com"}}
+
    Common action sequences with REQUIRED arguments:
    - Navigation: [
-       {"type": "browser", "action": "go_to_url", "args": {"url": "https://example.com"}}
+       {"type": "browser", "action": "go_to_url", "args": {"url": "https://www.google.com"}}
      ]
    - Form filling: [
        {"type": "input", "action": "input_text", "args": {"index": 1, "text": "search query"}},
@@ -47,12 +51,14 @@ export class SystemPrompt {
      ]
 
    Required arguments by action:
-   - go_to_url: {"url": "string"}
+   - go_to_url: {"url": "string"} - MUST include full URL with https://
    - click_element: {"index": number}
    - input_text: {"index": number, "text": "string"}
    - extract_text: {"index": number}
    - extract_page_content: {}
    - done: {"result": "string"}
+
+   NOTE: open_new_tab is not a valid action. Use go_to_url directly.
 
 
 3. ELEMENT INTERACTION:

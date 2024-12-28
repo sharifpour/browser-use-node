@@ -1,7 +1,17 @@
 import type { BrowserContext } from '../browser';
 
 /**
- * Base action model
+ * Action result
+ */
+export interface ActionResult {
+	error?: string;
+	extracted_content?: string;
+	is_done: boolean;
+	include_in_memory?: boolean;
+}
+
+/**
+ * Action model
  */
 export interface ActionModel {
 	type: string;
@@ -10,25 +20,17 @@ export interface ActionModel {
 }
 
 /**
- * Action result
+ * Action function
  */
-export interface ActionResult {
-	is_done?: boolean;
-	extracted_content?: string;
-	error?: string;
-	include_in_memory?: boolean;
-}
+export type ActionFunction = (args: Record<string, unknown>, browser?: BrowserContext) => Promise<ActionResult[]>;
 
 /**
- * Action handler function type
+ * Action registration
  */
-export type ActionHandler = (args: Record<string, unknown>, context: BrowserContext) => Promise<ActionResult[]>;
-
-/**
- * Action registry entry
- */
-export interface ActionRegistryEntry {
+export interface ActionRegistration {
 	description: string;
-	handler: ActionHandler;
-	requires_browser?: boolean;
+	handler: ActionFunction;
+	options: {
+		requiresBrowser: boolean;
+	};
 }
