@@ -43,6 +43,7 @@
 	"author": "Your Name",
 	"license": "MIT",
 	"dependencies": {
+		"@langchain/openai": "^0.0.10",
 		"axios": "^1.7.9",
 		"chai": "^4.3.7",
 		"cheerio": "^1.0.0-rc.12",
@@ -50,7 +51,7 @@
 		"dotenv": "^16.4.7",
 		"gif-encoder-2": "^1.0.5",
 		"gifencoder": "^2.0.1",
-		"langchain": "^0.0.200",
+		"langchain": "^0.1.0",
 		"limiter": "^2.1.0",
 		"playwright": "^1.40.1",
 		"playwright-core": "^1.40.1",

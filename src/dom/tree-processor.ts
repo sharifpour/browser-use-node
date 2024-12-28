@@ -1,138 +1,61 @@
-/**
- * DOM tree processor implementation
- */
-
-import crypto from 'node:crypto';
-import type { DOMElementNode, DOMHistoryElement } from "./types";
+import { createHash } from 'node:crypto';
+import type { DOMElementNode, DOMHistoryElement } from './types';
 
 /**
- * Hashed DOM element
+ * Hash of the dom element to be used as a unique identifier
  */
 export interface HashedDomElement {
-	/**
-	 * Branch path hash
-	 */
-	branchPathHash: string;
+  /**
+   * Hash of the parent branch path
+   */
+  branch_path_hash: string;
 
-	/**
-	 * Attributes hash
-	 */
-	attributesHash: string;
+  /**
+   * Hash of the element attributes
+   */
+  attributes_hash: string;
 }
 
-/**
- * Hash attributes of a DOM element
- */
-function hashAttributes(attributes: Record<string, string>): string {
-	const attributesString = Object.entries(attributes)
-		.map(([key, value]) => `${key}=${value}`)
-		.join('');
-	return crypto.createHash('sha256').update(attributesString).digest('hex');
-}
+export const hashDomElement = (domElement: DOMElementNode): HashedDomElement => {
+  const parentBranchPath = getParentBranchPath(domElement);
+  const branchPathHash = parentBranchPathHash(parentBranchPath);
+  const attributesHash = getAttributesHash(domElement.attributes);
 
-/**
- * Hash parent branch path
- */
-function parentBranchPathHash(path: string[]): string {
-	const pathString = path.join('/');
-	return crypto.createHash('sha256').update(pathString).digest('hex');
-}
+  return {
+    branch_path_hash: branchPathHash,
+    attributes_hash: attributesHash
+  };
+};
 
-/**
- * Get parent branch path
- */
-function getParentBranchPath(element: DOMElementNode): string[] {
-	const parents: DOMElementNode[] = [];
-	let currentElement: DOMElementNode = element;
-	while (currentElement.parent !== null) {
-		parents.push(currentElement);
-		currentElement = currentElement.parent;
-	}
-	parents.reverse();
-	return parents.map(parent => parent.tagName);
-}
+export const hashDomHistoryElement = (domHistoryElement: DOMHistoryElement): HashedDomElement => {
+  const branchPathHash = parentBranchPathHash(domHistoryElement.entireParentBranchPath);
+  const attributesHash = getAttributesHash(domHistoryElement.attributes);
 
-/**
- * Hash DOM history element
- */
-function hashDOMHistoryElement(element: DOMHistoryElement): HashedDomElement {
-	const branchPathHash = parentBranchPathHash(element.entireParentBranchPath);
-	const attributesHash = hashAttributes(element.attributes);
-	return {
-		branchPathHash,
-		attributesHash
-	};
-}
+  return {
+    branch_path_hash: branchPathHash,
+    attributes_hash: attributesHash
+  };
+};
 
-/**
- * Hash DOM element
- */
-function hashDOMElement(element: DOMElementNode): HashedDomElement {
-	const parentBranchPath = getParentBranchPath(element);
-	const branchPathHash = parentBranchPathHash(parentBranchPath);
-	const attributesHash = hashAttributes(element.attributes);
-	return {
-		branchPathHash,
-		attributesHash
-	};
-}
+const getParentBranchPath = (domElement: DOMElementNode): string[] => {
+  const path: string[] = [];
+  let current = domElement;
 
-/**
- * Type guard for DOMElementNode
- */
-function isDOMElementNode(node: unknown): node is DOMElementNode {
-	return typeof node === 'object' && node !== null && 'tagName' in node;
-}
+  while (current.parent) {
+    path.push(current.tag);
+    current = current.parent;
+  }
 
-/**
- * Convert DOM element to history element
- */
-export function convertDOMElementToHistoryElement(element: DOMElementNode): DOMHistoryElement {
-	const parentBranchPath = getParentBranchPath(element);
-	return {
-		tagName: element.tagName,
-		xpath: element.xpath,
-		highlightIndex: element.highlightIndex,
-		entireParentBranchPath: parentBranchPath,
-		attributes: { ...element.attributes },
-		shadowRoot: element.shadowRoot,
-		toDict: () => ({
-			tag_name: element.tagName,
-			xpath: element.xpath,
-			highlight_index: element.highlightIndex,
-			entire_parent_branch_path: parentBranchPath,
-			attributes: element.attributes,
-			shadow_root: element.shadowRoot,
-		})
-	};
-}
+  return path.reverse();
+};
 
-/**
- * Find history element in tree
- */
-export function findHistoryElementInTree(historyElement: DOMHistoryElement, tree: DOMElementNode): DOMElementNode | null {
-	const hashedHistoryElement = hashDOMHistoryElement(historyElement);
+const parentBranchPathHash = (parentBranchPath: string[]): string => {
+  const pathString = parentBranchPath.join('/');
+  return createHash('sha256').update(pathString).digest('hex');
+};
 
-	function processNode(node: DOMElementNode): DOMElementNode | null {
-		if (node.highlightIndex !== undefined) {
-			const hashedNode = hashDOMElement(node);
-			if (hashedNode.branchPathHash === hashedHistoryElement.branchPathHash &&
-				hashedNode.attributesHash === hashedHistoryElement.attributesHash) {
-				return node;
-			}
-		}
-
-		for (const child of node.children) {
-			if (isDOMElementNode(child)) {
-				const result = processNode(child);
-				if (result) {
-					return result;
-				}
-			}
-		}
-
-		return null;
-	}
-
-	return processNode(tree);
-}
+const getAttributesHash = (attributes: Record<string, string>): string => {
+  const sortedEntries = Object.entries(attributes).sort(([a], [b]) => a.localeCompare(b));
+  const attributesString = sortedEntries.map(([key, value]) => `${key}=${value}`).join('&');
+  return createHash('sha256').update(attributesString).digest('hex');
+};

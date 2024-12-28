@@ -1,38 +1,34 @@
-import type { BrowserContext } from '../browser/context';
-import type { z } from 'zod';
+import type { BrowserContext } from '../browser';
 
 /**
- * Action function type
+ * Base action model
  */
-export type ActionFunction = (
-	params: Record<string, unknown>,
-	browser?: BrowserContext
-) => Promise<ActionResult>;
-
-/**
- * Action options
- */
-export interface ActionOptions {
-	paramModel?: z.ZodType;
-	requiresBrowser?: boolean;
-}
-
-/**
- * Action registration
- */
-export interface ActionRegistration {
-	description: string;
-	handler: ActionFunction;
-	options?: ActionOptions;
+export interface ActionModel {
+	type: string;
+	action: string;
+	args: Record<string, unknown>;
 }
 
 /**
  * Action result
  */
 export interface ActionResult {
-	success: boolean;
-	error?: string;
-	data?: unknown;
-	include_in_memory?: boolean;
+	is_done?: boolean;
 	extracted_content?: string;
+	error?: string;
+	include_in_memory?: boolean;
+}
+
+/**
+ * Action handler function type
+ */
+export type ActionHandler = (args: Record<string, unknown>, context: BrowserContext) => Promise<ActionResult[]>;
+
+/**
+ * Action registry entry
+ */
+export interface ActionRegistryEntry {
+	description: string;
+	handler: ActionHandler;
+	requires_browser?: boolean;
 }

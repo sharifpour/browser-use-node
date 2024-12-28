@@ -2,7 +2,7 @@
  * DOM types and interfaces
  */
 
-import type { HashedDomElement } from "./tree-processor";
+import type { HashedDomElement } from './tree-processor';
 
 /**
  * Base DOM node
@@ -47,16 +47,16 @@ export interface DOMTextNode extends DOMBaseNode {
 /**
  * DOM element node
  */
-export interface DOMElementNode extends DOMBaseNode {
+export interface DOMElementNode {
 	/**
 	 * Element tag name
 	 */
-	tagName: string;
+	tag: string;
 
 	/**
-	 * Element XPath
+	 * Element text content
 	 */
-	xpath: string;
+	text?: string;
 
 	/**
 	 * Element attributes
@@ -64,34 +64,34 @@ export interface DOMElementNode extends DOMBaseNode {
 	attributes: Record<string, string>;
 
 	/**
-	 * Child elements
+	 * Element children
 	 */
-	children: DOMBaseNode[];
+	children: DOMElementNode[];
 
 	/**
-	 * Whether the element is interactive
+	 * Element XPath
 	 */
-	isInteractive: boolean;
+	xpath: string;
 
 	/**
-	 * Whether the element is a top element
+	 * Element selector ID
 	 */
-	isTopElement: boolean;
+	selector_id: number;
 
 	/**
-	 * Whether the element has a shadow root
+	 * Whether element is clickable
 	 */
-	shadowRoot: boolean;
+	is_clickable: boolean;
 
 	/**
-	 * Element highlight index
+	 * Whether element is visible
 	 */
-	highlightIndex?: number;
+	is_visible: boolean;
 
 	/**
-	 * Element location
+	 * Element bounding box
 	 */
-	location?: {
+	bounding_box?: {
 		x: number;
 		y: number;
 		width: number;
@@ -99,14 +99,9 @@ export interface DOMElementNode extends DOMBaseNode {
 	};
 
 	/**
-	 * Whether the element is clickable
+	 * Parent element
 	 */
-	isClickable: boolean;
-
-	/**
-	 * Whether the element is an iframe
-	 */
-	isIframe?: boolean;
+	parent?: DOMElementNode;
 }
 
 /**
