@@ -92,7 +92,7 @@ export class Registry {
         const index = args.index as number;
         const text = args.text as string;
 
-        await page.evaluate((idx: number, txt: string) => {
+        await page.evaluate(({ idx, txt }) => {
           const elements = Array.from(document.querySelectorAll('*'));
           for (const element of elements) {
             const indexAttr = (element as HTMLElement).dataset.index;
@@ -107,7 +107,7 @@ export class Registry {
             }
           }
           throw new Error(`Element with index ${idx} not found`);
-        }, index, text);
+        }, { idx: index, txt: text });
 
         return [{
           is_done: false
