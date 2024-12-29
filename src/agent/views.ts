@@ -1,26 +1,338 @@
-import type { SelectorMap } from '../browser/types';
-import type { BrowserStateHistoryData } from '../browser/views';
-import type { AgentOutput } from './types';
+import { mkdir, readFileSync, writeFileSync } from 'fs';
+import { RateLimitError } from 'openai';
+import { dirname } from 'path';
+import type { BrowserStateHistory } from '../browser/views';
+import type { ActionModel } from '../controller/registry/views';
+import type { DOMElementNode, SelectorMap } from '../dom/views';
 
-export interface AgentHistoryState {
-  state: BrowserStateHistoryData;
+export interface AgentStepInfo {
+  stepNumber: number;
+  maxSteps: number;
 }
 
-export const AgentHistoryUtils = {
-  getInteractedElement(_output: AgentOutput, _selector_map: SelectorMap): (Element | null)[] {
-    // TODO: Implement this method to match Python's behavior
-    return [null];
+export class ActionResult {
+  isDone = false;
+  extractedContent: string | null = null;
+  error: string | null = null;
+  includeInMemory = false;
+
+  constructor(data?: Partial<ActionResult>) {
+    Object.assign(this, data);
   }
-};
+
+  toJSON() {
+    return {
+      isDone: this.isDone,
+      extractedContent: this.extractedContent,
+      error: this.error,
+      includeInMemory: this.includeInMemory
+    };
+  }
+}
+
+export class AgentBrain {
+  evaluationPreviousGoal: string;
+  memory: string;
+  nextGoal: string;
+
+  constructor(data: {
+    evaluationPreviousGoal: string;
+    memory: string;
+    nextGoal: string;
+  }) {
+    this.evaluationPreviousGoal = data.evaluationPreviousGoal;
+    this.memory = data.memory;
+    this.nextGoal = data.nextGoal;
+  }
+
+  toJSON() {
+    return {
+      evaluationPreviousGoal: this.evaluationPreviousGoal,
+      memory: this.memory,
+      nextGoal: this.nextGoal
+    };
+  }
+}
+
+export class AgentOutput {
+  currentState: AgentBrain;
+  action: ActionModel[];
+
+  constructor(data: {
+    current_state: {
+      evaluation_previous_goal: string;
+      memory: string;
+      next_goal: string;
+    };
+    action: any[];
+  }) {
+    this.currentState = new AgentBrain({
+      evaluationPreviousGoal: data.current_state.evaluation_previous_goal,
+      memory: data.current_state.memory,
+      nextGoal: data.current_state.next_goal
+    });
+    this.action = data.action;
+  }
+
+  static typeWithCustomActions(_customActions: new () => ActionModel): typeof AgentOutput {
+    return class extends AgentOutput {
+      constructor(data: {
+        current_state: {
+          evaluation_previous_goal: string;
+          memory: string;
+          next_goal: string;
+        };
+        action: any[];
+      }) {
+        super({
+          current_state: {
+            evaluation_previous_goal: data.current_state.evaluation_previous_goal,
+            memory: data.current_state.memory,
+            next_goal: data.current_state.next_goal
+          },
+          action: data.action
+        });
+      }
+    };
+  }
+
+  toJSON() {
+    return {
+      current_state: {
+        evaluation_previous_goal: this.currentState.evaluationPreviousGoal,
+        memory: this.currentState.memory,
+        next_goal: this.currentState.nextGoal
+      },
+      action: this.action.map(a => ({
+        name: a.constructor.name,
+        index: a.getIndex()
+      }))
+    };
+  }
+}
+
+export class AgentHistory {
+  modelOutput: AgentOutput | null;
+  result: ActionResult[];
+  state: BrowserStateHistory;
+
+  constructor(data: {
+    modelOutput: AgentOutput | null;
+    result: ActionResult[];
+    state: BrowserStateHistory;
+  }) {
+    this.modelOutput = data.modelOutput ? new AgentOutput(data.modelOutput) : null;
+    this.result = data.result.map(r => new ActionResult(r));
+    this.state = data.state;
+  }
+
+  static getInteractedElement(
+    modelOutput: AgentOutput,
+    selectorMap: SelectorMap
+  ): (DOMElementNode | null)[] {
+    const elements: (DOMElementNode | null)[] = [];
+    for (const action of modelOutput.action) {
+      const index = action.getIndex();
+      if (index && index in selectorMap) {
+        const el: DOMElementNode = selectorMap[index];
+        elements.push(el);
+      } else {
+        elements.push(null);
+      }
+    }
+    return elements;
+  }
+
+  toJSON() {
+    let modelOutputDump = null;
+    if (this.modelOutput) {
+      modelOutputDump = this.modelOutput.toJSON();
+    }
+
+    return {
+      modelOutput: modelOutputDump,
+      result: this.result.map(r => r.toJSON()),
+      state: this.state.toDict()
+    };
+  }
+}
 
 export class AgentHistoryList {
-  private history: AgentHistoryState[] = [];
+  history: AgentHistory[];
 
-  constructor(history: AgentHistoryState[] = []) {
-    this.history = history;
+  constructor(data: { history: AgentHistory[] }) {
+    this.history = data.history.map(h => new AgentHistory(h));
   }
 
-  add(state: BrowserStateHistoryData): void {
-    this.history.push({ state });
+  toString(): string {
+    return `AgentHistoryList(allResults=${this.actionResults()}, allModelOutputs=${this.modelActions()})`;
+  }
+
+  saveToFile(filePath: string): void {
+    const data = this.toJSON();
+    // Ensure directory exists
+    const dir = dirname(filePath);
+    mkdir(dir, { recursive: true }, (err) => {
+      if (err) throw err;
+      writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+    });
+  }
+
+  toJSON() {
+    return {
+      history: this.history.map(h => h.toJSON())
+    };
+  }
+
+  static loadFromFile(filePath: string, outputModel: typeof AgentOutput): AgentHistoryList {
+    const data = JSON.parse(readFileSync(filePath, 'utf-8'));
+
+    // Loop through history and validate output_model actions to enrich with custom actions
+    for (const h of data.history) {
+      if (h.modelOutput) {
+        if (typeof h.modelOutput === 'object') {
+          h.modelOutput = new outputModel(h.modelOutput);
+        } else {
+          h.modelOutput = null;
+        }
+      }
+      if (!('interactedElement' in h.state)) {
+        h.state.interactedElement = null;
+      }
+    }
+
+    return new AgentHistoryList(data);
+  }
+
+  lastAction(): Record<string, any> | null {
+    if (this.history.length && this.history[this.history.length - 1].modelOutput) {
+      const lastHistory = this.history[this.history.length - 1];
+      const lastAction = lastHistory.modelOutput!.action[lastHistory.modelOutput!.action.length - 1];
+      return {
+        name: lastAction.constructor.name,
+        index: lastAction.getIndex()
+      };
+    }
+    return null;
+  }
+
+  errors(): string[] {
+    const errors: string[] = [];
+    for (const h of this.history) {
+      errors.push(...h.result.filter(r => r.error).map(r => r.error!));
+    }
+    return errors;
+  }
+
+  finalResult(): string | null {
+    if (
+      this.history.length &&
+      this.history[this.history.length - 1].result.length &&
+      this.history[this.history.length - 1].result[this.history[this.history.length - 1].result.length - 1].extractedContent
+    ) {
+      return this.history[this.history.length - 1].result[this.history[this.history.length - 1].result.length - 1].extractedContent;
+    }
+    return null;
+  }
+
+  isDone(): boolean {
+    if (
+      this.history.length &&
+      this.history[this.history.length - 1].result.length > 0
+    ) {
+      return this.history[this.history.length - 1].result[this.history[this.history.length - 1].result.length - 1].isDone;
+    }
+    return false;
+  }
+
+  hasErrors(): boolean {
+    return this.errors().length > 0;
+  }
+
+  urls(): string[] {
+    return this.history.filter(h => h.state.toDict().url).map(h => h.state.toDict().url);
+  }
+
+  screenshots(): string[] {
+    return this.history.filter(h => h.state.toDict().screenshot).map(h => h.state.toDict().screenshot!);
+  }
+
+  actionNames(): string[] {
+    return this.modelActions().map(action => Object.keys(action)[0]);
+  }
+
+  modelThoughts(): AgentBrain[] {
+    return this.history
+      .filter(h => h.modelOutput)
+      .map(h => h.modelOutput!.currentState);
+  }
+
+  modelOutputs(): AgentOutput[] {
+    return this.history
+      .filter(h => h.modelOutput)
+      .map(h => h.modelOutput!);
+  }
+
+  modelActions(): Record<string, any>[] {
+    const outputs: Record<string, any>[] = [];
+    for (const h of this.history) {
+      if (h.modelOutput) {
+        for (const action of h.modelOutput.action) {
+          outputs.push({
+            name: action.constructor.name,
+            index: action.getIndex()
+          });
+        }
+      }
+    }
+    return outputs;
+  }
+
+  actionResults(): ActionResult[] {
+    const results: ActionResult[] = [];
+    for (const h of this.history) {
+      results.push(...h.result.filter(r => r));
+    }
+    return results;
+  }
+
+  extractedContent(): string[] {
+    const content: string[] = [];
+    for (const h of this.history) {
+      content.push(...h.result.filter(r => r.extractedContent).map(r => r.extractedContent!));
+    }
+    return content;
+  }
+
+  modelActionsFiltered(include: string[] = []): Record<string, any>[] {
+    const outputs = this.modelActions();
+    const result: Record<string, any>[] = [];
+    for (const o of outputs) {
+      for (const i of include) {
+        if (i === Object.keys(o)[0]) {
+          result.push(o);
+        }
+      }
+    }
+    return result;
+  }
+}
+
+export class AgentError extends Error {
+  static VALIDATION_ERROR = 'Invalid model output format. Please follow the correct schema.';
+  static RATE_LIMIT_ERROR = 'Rate limit reached. Waiting before retry.';
+  static NO_VALID_ACTION = 'No valid action found';
+
+  static formatError(error: Error, includeTrace = false): string {
+    if (error instanceof Error && error.name === 'ValidationError') {
+      return `${AgentError.VALIDATION_ERROR}\nDetails: ${error.message}`;
+    }
+    if (error instanceof RateLimitError) {
+      return AgentError.RATE_LIMIT_ERROR;
+    }
+    if (includeTrace) {
+      return `${error.message}\nStacktrace:\n${error.stack}`;
+    }
+    return error.message;
   }
 }

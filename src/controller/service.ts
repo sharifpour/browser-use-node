@@ -1,34 +1,35 @@
-/**
- * Browser action controller
- */
-
-import type { BrowserContext } from '../browser';
-import { Registry } from './registry/service';
-import type { ActionModel, ActionResult } from './types';
+import type { ActionResult } from '../agent/views';
+import type { BrowserContext } from '../browser/context';
+import { logger } from '../utils/logging';
+import { ActionRegistry } from './registry/service';
+import type { ActionModel } from './registry/views';
 
 export class Controller {
-	private readonly registry: Registry;
+  private registry: ActionRegistry;
 
-	constructor() {
-		this.registry = new Registry();
-	}
+  constructor(registry?: ActionRegistry) {
+    this.registry = registry || new ActionRegistry();
+  }
 
-	public async execute_action(action: ActionModel, context: BrowserContext): Promise<ActionResult[]> {
-		try {
-			const handler = this.registry.get_action(action.action);
-			if (!handler) {
-				return [{
-					error: `Unknown action: ${action.action}`,
-					is_done: false
-				}];
-			}
+  async multiAct(
+    actions: ActionModel[],
+    browserContext: BrowserContext
+  ): Promise<ActionResult[]> {
+    const results: ActionResult[] = [];
+    for (const action of actions) {
+      try {
+        const result = await this.registry.executeAction(action, browserContext);
+        results.push(result);
+      } catch (error) {
+        logger.error(`Error executing action: ${error}`);
+        results.push({ error: error instanceof Error ? error.message : String(error) });
+        break;
+      }
+    }
+    return results;
+  }
 
-			return await handler(action.args, context);
-		} catch (error) {
-			return [{
-				error: error instanceof Error ? error.message : String(error),
-				is_done: false
-			}];
-		}
-	}
+  getPromptDescription(): string {
+    return this.registry.getPromptDescription();
+  }
 }

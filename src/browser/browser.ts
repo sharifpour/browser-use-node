@@ -1,129 +1,351 @@
-/**
- * Playwright browser on steroids.
- */
+/*
+"""
+Playwright browser on steroids.
+"""
 
-import { type Browser as PlaywrightBrowser, type BrowserContext as PlaywrightContext, chromium } from 'playwright';
-import { logger } from '../utils/logger';
-import { BrowserContext } from './context';
-import type { BrowserConfig, BrowserContextConfig } from './types';
+import asyncio
+import logging
+from dataclasses import dataclass, field
+
+from playwright._impl._api_structures import ProxySettings
+from playwright.async_api import Browser as PlaywrightBrowser
+from playwright.async_api import (
+  Playwright,
+  async_playwright,
+)
+
+from browser_use.browser.context import BrowserContext, BrowserContextConfig
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class BrowserConfig:
+  """
+  Configuration for the Browser.
+
+  Default values:
+    headless: True
+      Whether to run browser in headless mode
+
+    disable_security: False
+      Disable browser security features
+
+    extra_chromium_args: []
+      Extra arguments to pass to the browser
+
+    wss_url: None
+      Connect to a browser instance via WebSocket
+
+    chrome_instance_path: None
+      Path to a Chrome instance to use to connect to your normal browser
+      e.g. '/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome'
+  """
+
+  headless: bool = False
+  disable_security: bool = True
+  extra_chromium_args: list[str] = field(default_factory=list)
+  chrome_instance_path: str | None = None
+  wss_url: str | None = None
+
+  proxy: ProxySettings | None = field(default=None)
+  new_context_config: BrowserContextConfig = field(default_factory=BrowserContextConfig)
+
+
+# @singleton: TODO - think about id singleton makes sense here
+# @dev By default this is a singleton, but you can create multiple instances if you need to.
+class Browser:
+  """
+  Playwright browser on steroids.
+
+  This is persistant browser factory that can spawn multiple browser contexts.
+  It is recommended to use only one instance of Browser per your application (RAM usage will grow otherwise).
+  """
+
+  def __init__(
+    self,
+    config: BrowserConfig = BrowserConfig(),
+  ):
+    logger.debug('Initializing new browser')
+    self.config = config
+    self.playwright: Playwright | None = None
+    self.playwright_browser: PlaywrightBrowser | None = None
+
+  async def new_context(
+    self, config: BrowserContextConfig = BrowserContextConfig()
+  ) -> BrowserContext:
+    """Create a browser context"""
+    return BrowserContext(config=config, browser=self)
+
+  async def get_playwright_browser(self) -> PlaywrightBrowser:
+    """Get a browser context"""
+    if self.playwright_browser is None:
+      return await self._init()
+
+    return self.playwright_browser
+
+  async def _init(self):
+    """Initialize the browser session"""
+    playwright = await async_playwright().start()
+    browser = await self._setup_browser(playwright)
+
+    self.playwright = playwright
+    self.playwright_browser = browser
+
+    return self.playwright_browser
+
+  async def _setup_browser(self, playwright: Playwright) -> PlaywrightBrowser:
+    """Sets up and returns a Playwright Browser instance with anti-detection measures."""
+    if self.config.wss_url:
+      browser = await playwright.chromium.connect(self.config.wss_url)
+      return browser
+    elif self.config.chrome_instance_path:
+      import subprocess
+
+      import requests
+
+      try:
+        # Check if browser is already running
+        response = requests.get('http://localhost:9222/json/version', timeout=2)
+        if response.status_code == 200:
+          logger.info('Reusing existing Chrome instance')
+          browser = await playwright.chromium.connect_over_cdp(
+            endpoint_url='http://localhost:9222',
+            timeout=20000,  # 20 second timeout for connection
+          )
+          return browser
+      except requests.ConnectionError:
+        logger.debug('No existing Chrome instance found, starting a new one')
+
+      # Start a new Chrome instance
+      subprocess.Popen(
+        [
+          self.config.chrome_instance_path,
+          '--remote-debugging-port=9222',
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+      )
+
+      # Attempt to connect again after starting a new instance
+      try:
+        browser = await playwright.chromium.connect_over_cdp(
+          endpoint_url='http://localhost:9222',
+          timeout=20000,  # 20 second timeout for connection
+        )
+        return browser
+      except Exception as e:
+        logger.error(f'Failed to start a new Chrome instance.: {str(e)}')
+        raise RuntimeError(
+          ' To start chrome in Debug mode, you need to close all existing Chrome instances and try again otherwise we can not connect to the instance.'
+        )
+
+    else:
+      try:
+        disable_security_args = []
+        if self.config.disable_security:
+          disable_security_args = [
+            '--disable-web-security',
+            '--disable-site-isolation-trials',
+            '--disable-features=IsolateOrigins,site-per-process',
+          ]
+
+        browser = await playwright.chromium.launch(
+          headless=self.config.headless,
+          args=[
+            '--no-sandbox',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-infobars',
+            '--disable-background-timer-throttling',
+            '--disable-popup-blocking',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-window-activation',
+            '--disable-focus-on-load',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--no-startup-window',
+            '--window-position=0,0',
+            # '--window-size=1280,1000',
+          ]
+          + disable_security_args
+          + self.config.extra_chromium_args,
+          proxy=self.config.proxy,
+        )
+
+        return browser
+      except Exception as e:
+        logger.error(f'Failed to initialize Playwright browser: {str(e)}')
+        raise
+
+  async def close(self):
+    """Close the browser instance"""
+    try:
+      if self.playwright_browser:
+        await self.playwright_browser.close()
+      if self.playwright:
+        await self.playwright.stop()
+    except Exception as e:
+      logger.debug(f'Failed to close browser properly: {e}')
+    finally:
+      self.playwright_browser = None
+      self.playwright = None
+
+  def __del__(self):
+    """Async cleanup when object is destroyed"""
+    try:
+      if self.playwright_browser or self.playwright:
+        loop = asyncio.get_running_loop()
+        if loop.is_running():
+          loop.create_task(self.close())
+        else:
+          asyncio.run(self.close())
+    except Exception as e:
+      logger.debug(f'Failed to cleanup browser in destructor: {e}')
+
+*/
+
+
+import { chromium } from 'playwright';
+import type { Browser as PlaywrightBrowser, ProxySettings } from '../types/playwright';
+import { logger } from '../utils/logging';
+import { BrowserContext, BrowserContextConfig } from './context';
+
+export interface BrowserConfig {
+  headless?: boolean;
+  disableSecurity?: boolean;
+  extraChromiumArgs?: string[];
+  chromeInstancePath?: string;
+  wssUrl?: string;
+  proxy?: ProxySettings;
+  newContextConfig?: BrowserContextConfig;
+}
+
+const defaultConfig: BrowserConfig = {
+  headless: false,
+  disableSecurity: true,
+  extraChromiumArgs: [],
+  chromeInstancePath: undefined,
+  wssUrl: undefined,
+  proxy: undefined,
+  newContextConfig: new BrowserContextConfig()
+};
 
 export class Browser {
-	private config: BrowserConfig;
-	private playwright_browser: PlaywrightBrowser | null = null;
+  private config: BrowserConfig;
+  private playwrightBrowser: PlaywrightBrowser | null = null;
 
-	constructor(config: BrowserConfig = {}) {
-		logger.debug('Initializing new browser');
-		this.config = config;
-	}
+  constructor(config: BrowserConfig = {}) {
+    logger.debug('Initializing new browser');
+    this.config = { ...defaultConfig, ...config };
+  }
 
-	async new_context(config: BrowserContextConfig = {}): Promise<BrowserContext> {
-		const playwright_browser = await this.get_playwright_browser();
-		const context = await this._create_context(playwright_browser);
-		const browserContext = new BrowserContext(context, config);
-		await browserContext.initialize();
-		return browserContext;
-	}
+  async newContext(config: BrowserContextConfig = new BrowserContextConfig()): Promise<BrowserContext> {
+    return new BrowserContext(this, config);
+  }
 
-	async get_playwright_browser(): Promise<PlaywrightBrowser> {
-		if (!this.playwright_browser) {
-			return await this._init();
-		}
-		return this.playwright_browser;
-	}
+  async getPlaywrightBrowser(): Promise<PlaywrightBrowser> {
+    if (!this.playwrightBrowser) {
+      return await this.init();
+    }
+    return this.playwrightBrowser;
+  }
 
-	private async _init(): Promise<PlaywrightBrowser> {
-		const browser = await this._setup_browser();
-		this.playwright_browser = browser;
-		return browser;
-	}
+  private async init(): Promise<PlaywrightBrowser> {
+    const browser = await this.setupBrowser();
+    this.playwrightBrowser = browser;
+    return this.playwrightBrowser;
+  }
+  
 
-	private async _setup_browser(): Promise<PlaywrightBrowser> {
-		try {
-			const disable_security_args = this.config.disable_security ? [
-				'--disable-web-security',
-				'--disable-site-isolation-trials',
-				'--disable-features=IsolateOrigins,site-per-process'
-			] : [];
+  private async setupBrowser(): Promise<PlaywrightBrowser> {
+    if (this.config.wssUrl) {
+      return await chromium.connect(this.config.wssUrl);
+    }
 
-			const browser = await chromium.launch({
-				headless: this.config.headless,
-				args: [
-					'--no-sandbox',
-					'--disable-blink-features=AutomationControlled',
-					'--disable-infobars',
-					'--disable-background-timer-throttling',
-					'--disable-popup-blocking',
-					'--disable-backgrounding-occluded-windows',
-					'--disable-renderer-backgrounding',
-					'--disable-window-activation',
-					'--disable-focus-on-load',
-					'--no-first-run',
-					'--no-default-browser-check',
-					'--no-startup-window',
-					'--window-position=0,0',
-					...disable_security_args,
-					...(this.config.extra_chromium_args || [])
-				],
-				proxy: this.config.proxy
-			});
+    if (this.config.chromeInstancePath) {
+      try {
+        // Check if browser is already running
+        const response = await fetch('http://localhost:9222/json/version', {
+          timeout: 2000
+        });
 
-			return browser;
-		} catch (e) {
-			logger.error(`Failed to initialize Playwright browser: ${e}`);
-			throw e;
-		}
-	}
+        if (response.ok) {
+          logger.info('Reusing existing Chrome instance');
+          return await chromium.connectOverCDP({
+            endpointURL: 'http://localhost:9222',
+            timeout: 20000
+          });
+        }
+      } catch (error) {
+        logger.debug('No existing Chrome instance found, starting a new one');
+      }
 
-	private async _create_context(browser: PlaywrightBrowser): Promise<PlaywrightContext> {
-		const context = await browser.newContext({
-			viewport: this.config.browser_window_size,
-			userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.102 Safari/537.36',
-			javaScriptEnabled: true,
-			bypassCSP: this.config.disable_security,
-			ignoreHTTPSErrors: this.config.disable_security
-		});
+      // Start new Chrome instance
+      const process = spawn(this.config.chromeInstancePath, [
+        '--remote-debugging-port=9222'
+      ], {
+        stdio: 'ignore'
+      });
 
-		// Add anti-detection scripts
-		await context.addInitScript(`
-			// Webdriver property
-			Object.defineProperty(navigator, 'webdriver', {
-				get: () => undefined
-			});
+      try {
+        return await chromium.connectOverCDP({
+          endpointURL: 'http://localhost:9222',
+          timeout: 20000
+        });
+      } catch (error) {
+        logger.error(`Failed to start Chrome instance: ${error}`);
+        throw new Error(
+          'To start Chrome in Debug mode, you need to close all existing Chrome instances and try again otherwise we cannot connect to the instance.'
+        );
+      }
+    }
 
-			// Languages
-			Object.defineProperty(navigator, 'languages', {
-				get: () => ['en-US', 'en']
-			});
+    try {
+      const disableSecurityArgs = this.config.disableSecurity
+        ? [
+          '--disable-web-security',
+          '--disable-site-isolation-trials',
+          '--disable-features=IsolateOrigins,site-per-process',
+        ]
+        : [];
 
-			// Plugins
-			Object.defineProperty(navigator, 'plugins', {
-				get: () => [1, 2, 3, 4, 5]
-			});
+      return await chromium.launch({
+        headless: this.config.headless,
+        args: [
+          '--no-sandbox',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-infobars',
+          '--disable-background-timer-throttling',
+          '--disable-popup-blocking',
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-window-activation',
+          '--disable-focus-on-load',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--no-startup-window',
+          '--window-position=0,0',
+          ...disableSecurityArgs,
+          ...(this.config.extraChromiumArgs || [])
+        ],
+        proxy: this.config.proxy
+      });
+    } catch (error) {
+      logger.error(`Failed to initialize Playwright browser: ${error}`);
+      throw error;
+    }
+  }
 
-			// Chrome runtime
-			window.chrome = { runtime: {} };
-
-			// Permissions
-			const originalQuery = window.navigator.permissions.query;
-			window.navigator.permissions.query = (parameters) => (
-				parameters.name === 'notifications' ?
-					Promise.resolve({ state: Notification.permission }) :
-					originalQuery(parameters)
-			);
-		`);
-
-		return context;
-	}
-
-	async close(): Promise<void> {
-		try {
-			if (this.playwright_browser) {
-				await this.playwright_browser.close();
-			}
-		} catch (e) {
-			logger.debug(`Failed to close browser properly: ${e}`);
-		} finally {
-			this.playwright_browser = null;
-		}
-	}
+  async close(): Promise<void> {
+    try {
+      if (this.playwrightBrowser) {
+        await this.playwrightBrowser.close();
+      }
+    } catch (error) {
+      logger.debug(`Failed to close browser properly: ${error}`);
+    } finally {
+      this.playwrightBrowser = null;
+    }
+  }
 }

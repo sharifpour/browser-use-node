@@ -1,105 +1,253 @@
 import type { Page } from 'playwright';
-import { logger } from '../utils/logger';
-import { buildDomTreeFn } from './buildDomTree';
-import { type DOMBaseNode, DOMElementNode, type DOMState, DOMTextNode, type SelectorMap } from './types';
+import { type DOMBaseNode, DOMElementNode, type DOMState, DOMTextNode, type SelectorMap } from './views';
+
+// Load buildDomTree.js content at module initialization
+const buildDomTreeJs = `
+function buildDomTree(highlightElements) {
+  let highlightIndex = 0;
+
+  const isVisible = (element) => {
+    if (!(element instanceof Element)) return true;
+    const style = window.getComputedStyle(element);
+    return (
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      style.opacity !== '0' &&
+      element.offsetWidth > 0 &&
+      element.offsetHeight > 0
+    );
+  };
+
+  const isInteractive = (element) => {
+    if (!(element instanceof Element)) return false;
+    const tagName = element.tagName.toLowerCase();
+    const type = element.getAttribute('type')?.toLowerCase();
+    const role = element.getAttribute('role')?.toLowerCase();
+
+    // Check if element is naturally interactive
+    if (['a', 'button', 'input', 'select', 'textarea'].includes(tagName)) return true;
+
+    // Check for ARIA roles that indicate interactivity
+    if (role && ['button', 'link', 'menuitem', 'tab'].includes(role)) return true;
+
+    // Check for event listeners
+    const hasClickListener = element.onclick !== null || element._click !== undefined;
+    if (hasClickListener) return true;
+
+    // Check for cursor style
+    const style = window.getComputedStyle(element);
+    if (style.cursor === 'pointer') return true;
+
+    return false;
+  };
+
+  const getAttributes = (element) => {
+    if (!(element instanceof Element)) return {};
+    const attributes = {};
+    for (const attr of element.attributes) {
+      attributes[attr.name] = attr.value;
+    }
+    return attributes;
+  };
+
+  const getXPath = (element) => {
+    if (!(element instanceof Element)) return '';
+    let paths = [];
+    let current = element;
+
+    while (current && current.nodeType === Node.ELEMENT_NODE) {
+      let index = 0;
+      let hasFollowingSibling = false;
+      for (let sibling = current.previousSibling; sibling; sibling = sibling.previousSibling) {
+        if (sibling.nodeType !== Node.DOCUMENT_TYPE_NODE && sibling.nodeName === current.nodeName) {
+          index++;
+        }
+      }
+
+      for (let sibling = current.nextSibling; sibling && !hasFollowingSibling; sibling = sibling.nextSibling) {
+        if (sibling.nodeName === current.nodeName) {
+          hasFollowingSibling = true;
+        }
+      }
+
+      const tagName = current.nodeName.toLowerCase();
+      const pathIndex = index || hasFollowingSibling ? \`[\${index + 1}]\` : '';
+      paths.unshift(tagName + pathIndex);
+
+      if (current.id) {
+        paths = [\`//*[@id='\${current.id}']\`];
+        break;
+      }
+
+      current = current.parentNode;
+    }
+
+    return '/' + paths.join('/');
+  };
+
+  const processNode = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent.trim();
+      if (!text) return null;
+
+      return {
+        type: 'TEXT_NODE',
+        text,
+        isVisible: isVisible(node.parentElement)
+      };
+    }
+
+    if (node.nodeType !== Node.ELEMENT_NODE) return null;
+
+    const element = node;
+    const visible = isVisible(element);
+    const interactive = isInteractive(element);
+
+    // Skip invisible and non-interactive elements and their children
+    if (!visible && !interactive) return null;
+
+    const children = [];
+    for (const child of element.childNodes) {
+      const processedChild = processNode(child);
+      if (processedChild) {
+        children.push(processedChild);
+      }
+    }
+
+    const result = {
+      tagName: element.tagName.toLowerCase(),
+      xpath: getXPath(element),
+      attributes: getAttributes(element),
+      isVisible: visible,
+      isInteractive: interactive,
+      children
+    };
+
+    if (highlightElements && interactive) {
+      result.highlightIndex = highlightIndex++;
+      element.setAttribute('data-highlight', result.highlightIndex.toString());
+      element.style.outline = '2px solid red';
+      element.style.backgroundColor = 'rgba(255, 0, 0, 0.1)';
+    }
+
+    return result;
+  };
+
+  return processNode(document.documentElement);
+}
+`;
+
+interface NodeData {
+  type?: string;
+  text?: string;
+  isVisible?: boolean;
+  tagName?: string;
+  xpath?: string;
+  attributes?: Record<string, string>;
+  isInteractive?: boolean;
+  isTopElement?: boolean;
+  highlightIndex?: number;
+  shadowRoot?: boolean;
+  children?: NodeData[];
+}
 
 export class DomService {
-	private readonly page: Page;
-	private readonly xpath_cache: Record<string, any> = {};
+  private page: Page;
+  private xpathCache: Record<string, any> = {};
 
-	constructor(page: Page) {
-		this.page = page;
-	}
+  constructor(page: Page) {
+    this.page = page;
+  }
 
-	// region - Clickable elements
-	async get_clickable_elements(highlight_elements = true): Promise<DOMState> {
-		const element_tree = await this._build_dom_tree(highlight_elements);
-		const selector_map = this._create_selector_map(element_tree);
+  async getElementTree(): Promise<DOMElementNode> {
+    const elementTree = await this.buildDomTree(true);
+    return elementTree;
+  }
 
-		return {
-			element_tree,
-			selector_map
-		};
-	}
+  async getClickableElements(highlightElements = true): Promise<DOMState> {
+    const elementTree = await this.buildDomTree(highlightElements);
+    const selectorMap = this.createSelectorMap(elementTree);
 
-	private async _build_dom_tree(highlight_elements: boolean): Promise<DOMElementNode> {
-		try {
-			// Inject the buildDomTree function into the page context
-			await this.page.evaluate(`window.buildDomTree = ${buildDomTreeFn}`);
+    return {
+      elementTree,
+      selectorMap
+    };
+  }
 
-			// Call the injected function with the parameter
-			const eval_page = await this.page.evaluate(`window.buildDomTree(${highlight_elements})`);
-			const html_to_dict = this._parse_node(eval_page);
+  private async buildDomTree(highlightElements: boolean): Promise<DOMElementNode> {
+    // First, inject the buildDomTree function
+    await this.page.evaluate(`window.buildDomTree = ${buildDomTreeJs}`);
 
-			if (!html_to_dict || !(html_to_dict instanceof DOMElementNode)) {
-				throw new Error('Failed to parse HTML to dictionary');
-			}
+    // Then call the function
+    const evalPage = await this.page.evaluate(`buildDomTree(${highlightElements})`) as NodeData;
+    const htmlToDict = this.parseNode(evalPage);
 
-			return html_to_dict;
-		} catch (error) {
-			logger.error('Error building DOM tree:', error);
-			throw error;
-		}
-	}
+    if (!htmlToDict || !(htmlToDict instanceof DOMElementNode)) {
+      throw new Error('Failed to parse HTML to dictionary');
+    }
 
-	private _create_selector_map(element_tree: DOMElementNode): SelectorMap {
-		const selector_map: SelectorMap = {};
+    return htmlToDict;
+  }
 
-		const process_node = (node: DOMBaseNode): void => {
-			if (node instanceof DOMElementNode && node.highlight_index !== null) {
-				selector_map[node.highlight_index] = node;
+  private createSelectorMap(elementTree: DOMElementNode): SelectorMap {
+    const selectorMap: SelectorMap = {};
 
-				for (const child of node.children) {
-					process_node(child);
-				}
-			}
-		};
+    const processNode = (node: DOMBaseNode) => {
+      if (node instanceof DOMElementNode && node.highlightIndex !== undefined) {
+        selectorMap[node.highlightIndex] = node;
+      }
 
-		process_node(element_tree);
-		return selector_map;
-	}
+      if (node instanceof DOMElementNode) {
+        for (const child of node.children) {
+          processNode(child);
+        }
+      }
+    };
 
-	private _parse_node(
-		node_data: any,
-		parent: DOMElementNode | null = null
-	): DOMBaseNode | null {
-		if (!node_data) {
-			return null;
-		}
+    processNode(elementTree);
+    return selectorMap;
+  }
 
-		if (node_data.type === 'TEXT_NODE') {
-			return new DOMTextNode({
-				text: node_data.text,
-				is_visible: node_data.isVisible,
-				parent
-			});
-		}
+  private parseNode(
+    nodeData: NodeData,
+    parent?: DOMElementNode
+  ): DOMBaseNode | null {
+    if (!nodeData) {
+      return null;
+    }
 
-		const element_node = new DOMElementNode({
-			tag_name: node_data.tagName,
-			xpath: node_data.xpath,
-			attributes: node_data.attributes || {},
-			children: [], // Initialize empty, will fill later
-			is_visible: node_data.isVisible ?? false,
-			is_interactive: node_data.isInteractive ?? false,
-			is_top_element: node_data.isTopElement ?? false,
-			highlight_index: node_data.highlightIndex ?? null,
-			shadow_root: node_data.shadowRoot ?? false,
-			parent
-		});
+    if (nodeData.type === 'TEXT_NODE') {
+      return new DOMTextNode(
+        nodeData.text || '',
+        parent
+      );
+    }
 
-		const children: DOMBaseNode[] = [];
-		for (const child of node_data.children || []) {
-			if (child) {
-				const child_node = this._parse_node(child, element_node);
-				if (child_node) {
-					children.push(child_node);
-				}
-			}
-		}
+    const tagName = nodeData.tagName || '';
 
-		element_node.children = children;
-		return element_node;
-	}
-	// endregion
+    const elementNode = new DOMElementNode(
+      tagName,
+      nodeData.xpath || '',
+      nodeData.attributes || {},
+      [],
+      parent,
+      undefined,
+      undefined,
+      nodeData.highlightIndex
+    );
+
+    const children: DOMBaseNode[] = [];
+    for (const child of nodeData.children || []) {
+      if (child) {
+        const childNode = this.parseNode(child, elementNode);
+        if (childNode) {
+          children.push(childNode);
+        }
+      }
+    }
+
+    elementNode.children = children;
+
+    return elementNode;
+  }
 }
