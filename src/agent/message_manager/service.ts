@@ -1,4 +1,5 @@
-import { type BaseChatModel, type BaseMessage, HumanMessage, SystemMessage } from 'langchain/schema';
+import { type BaseChatModel } from 'langchain/chat_models/base';
+import { type BaseMessage, HumanMessage, SystemMessage } from 'langchain/schema';
 import type { BrowserState } from '../../browser/views';
 import { AgentMessagePrompt, SystemPrompt } from '../prompts';
 import type { ActionResult, AgentOutput, AgentStepInfo } from '../views';

@@ -11,7 +11,8 @@
         "noExplicitAny": "off"
       },
       "correctness": {
-        "noUnusedVariables": "error"
+        "noUnusedVariables": "error",
+        
       }
     },
     "ignore": [

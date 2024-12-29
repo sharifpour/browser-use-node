@@ -4,6 +4,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { Browser } from '../browser/browser';
 import { BrowserContext } from '../browser/context';
 import { type BrowserState, BrowserStateHistory } from '../browser/views';
+import {
+  ClickAction,
+  DoneAction,
+  ExtractAction,
+  InputAction,
+  NavigateAction,
+  ScrollAction,
+  TabAction
+} from '../controller/registry/actions';
+import type { ActionModel } from '../controller/registry/views';
 import { Controller } from '../controller/service';
 import { type DOMHistoryElement, HistoryTreeProcessor } from '../dom/history_tree_processor/service';
 import { timeExecutionAsync } from '../utils';
@@ -11,7 +21,6 @@ import { logger } from '../utils/logging';
 import { MessageManager } from './message_manager/service';
 import { AgentMessagePrompt, SystemPrompt } from './prompts';
 import {
-  type ActionModel,
   ActionResult,
   AgentError,
   AgentHistory,
@@ -184,7 +193,7 @@ export class Agent {
     }
   }
 
-  @timeExecutionAsync('--step')
+  @timeExecutionAsync('step')
   async step(stepInfo?: AgentStepInfo): Promise<void> {
     logger.info(`\n📍 Step ${this.nSteps}`);
     let state: BrowserState | null = null;
@@ -209,17 +218,18 @@ export class Agent {
 
       this.consecutiveFailures = 0;
     } catch (error) {
-      result = this.handleStepError(error);
+      result = await this.handleStepError(error);
       this.lastResult = result;
     } finally {
-      if (!result) return;
-      for (const r of result) {
-        if (r.error) {
-          // TODO: Implement telemetry
+      if (result && result.length > 0) {
+        for (const r of result) {
+          if (r.error) {
+            // TODO: Implement telemetry
+          }
         }
-      }
-      if (state) {
-        this.makeHistoryItem(modelOutput, state, result);
+        if (state) {
+          this.makeHistoryItem(modelOutput, state, result);
+        }
       }
     }
   }
@@ -252,7 +262,7 @@ export class Agent {
     result: ActionResult[]
   ): void {
     const interactedElements = modelOutput
-      ? AgentHistory.getInteractedElement(modelOutput, state.selectorMap)
+      ? AgentHistory.getInteractedElement(modelOutput, state.selectorMap).map(el => el?.toString() || null)
       : [null];
 
     const stateHistory = new BrowserStateHistory({
@@ -264,7 +274,14 @@ export class Agent {
     });
 
     const historyItem = new AgentHistory({
-      modelOutput,
+      modelOutput: modelOutput ? {
+        current_state: {
+          evaluation_previous_goal: modelOutput.currentState.evaluationPreviousGoal,
+          memory: modelOutput.currentState.memory,
+          next_goal: modelOutput.currentState.nextGoal
+        },
+        action: modelOutput.action
+      } : null,
       result,
       state: stateHistory
     });
@@ -272,73 +289,58 @@ export class Agent {
     this.history.history.push(historyItem);
   }
 
-  @timeExecutionAsync('--get_next_action')
+  @timeExecutionAsync('getNextAction')
   private async getNextAction(inputMessages: BaseMessage[]): Promise<AgentOutput> {
     logger.info(`Input messages: ${JSON.stringify(inputMessages)}`);
-
-    // Create a structured output schema
-    const schema = {
-      name: 'extract',
-      description: 'Extract structured output from the LLM response',
-      parameters: {
-        type: 'object',
-        properties: {
-          current_state: {
-            type: 'object',
-            properties: {
-              evaluation_previous_goal: { type: 'string' },
-              memory: { type: 'string' },
-              next_goal: { type: 'string' }
-            },
-            required: ['evaluation_previous_goal', 'memory', 'next_goal']
-          },
-          action: {
-            type: 'array',
-            items: {
+    // @ts-expect-error - LangChain types don't include bind method with function calling
+    const structuredLlm = this.llm.bind({
+      functions: [{
+        name: 'agent_action',
+        description: 'Agent action response',
+        parameters: {
+          type: 'object',
+          properties: {
+            current_state: {
               type: 'object',
               properties: {
-                name: { type: 'string' },
-                index: { type: 'number' }
+                evaluation_previous_goal: { type: 'string' },
+                memory: { type: 'string' },
+                next_goal: { type: 'string' }
+              },
+              required: ['evaluation_previous_goal', 'memory', 'next_goal']
+            },
+            action: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: true
               }
             }
-          }
-        },
-        required: ['current_state', 'action']
-      }
-    };
-
-    const structuredLlm = this.llm.bind({
-      functions: [schema],
-      function_call: { name: 'extract' }
+          },
+          required: ['current_state', 'action']
+        }
+      }],
+      function_call: { name: 'agent_action' }
     });
 
     logger.info(`Structured LLM: ${JSON.stringify(structuredLlm)}`);
     const response = await structuredLlm.invoke(inputMessages);
     logger.info(`Raw response: ${JSON.stringify(response)}`);
 
-    if (!response || !response.additional_kwargs?.function_call) {
-      throw new Error('Invalid response from LLM: Response or function call is missing');
+    if (!response || !response.additional_kwargs?.function_call?.arguments) {
+      throw new Error('Invalid response from LLM: Response or function call arguments are missing');
     }
 
     try {
       const parsed = JSON.parse(response.additional_kwargs.function_call.arguments);
       logger.info(`Response parsed: ${JSON.stringify(parsed)}`);
-
-      const agentOutput = new AgentOutput({
-        current_state: {
-          evaluation_previous_goal: parsed.current_state.evaluation_previous_goal,
-          memory: parsed.current_state.memory,
-          next_goal: parsed.current_state.next_goal
-        },
-        action: parsed.action
-      });
-
-      logger.info(`Parsed: ${JSON.stringify(agentOutput)}`);
-      agentOutput.action = agentOutput.action.slice(0, this.maxActionsPerStep);
-      logger.info(`Parsed action: ${JSON.stringify(agentOutput.action)}`);
-      this.logResponse(agentOutput);
+      const output = new AgentOutput(parsed);
+      logger.info(`Parsed: ${JSON.stringify(output)}`);
+      output.action = output.action.slice(0, this.maxActionsPerStep);
+      logger.info(`Parsed action: ${JSON.stringify(output.action)}`);
+      this.logResponse(output);
       this.nSteps++;
-      return agentOutput;
+      return output;
     } catch (error) {
       throw new Error(`Failed to parse LLM response: ${error}`);
     }
@@ -468,7 +470,12 @@ export class Agent {
 
       if (!historyItem.modelOutput?.action || historyItem.modelOutput.action.length === 0) {
         logger.warning(`Step ${i + 1}: No action to replay, skipping`);
-        results.push({ error: 'No action to replay' });
+        results.push(new ActionResult({
+          isDone: false,
+          extractedContent: null,
+          error: 'No action to replay',
+          includeInMemory: true
+        }));
         continue;
       }
 
@@ -484,7 +491,12 @@ export class Agent {
             const errorMsg = `Step ${i + 1} failed after ${maxRetries} attempts: ${error}`;
             logger.error(errorMsg);
             if (!skipFailures) {
-              results.push({ error: errorMsg });
+              results.push(new ActionResult({
+                isDone: false,
+                extractedContent: null,
+                error: errorMsg,
+                includeInMemory: true
+              }));
               throw new Error(errorMsg);
             }
           } else {
@@ -583,5 +595,47 @@ export class Agent {
       filePath = 'AgentHistory.json';
     }
     this.history.saveToFile(filePath);
+  }
+
+  private convertAction(action: any): ActionModel {
+    const actionName = action.name.toLowerCase();
+    switch (actionName) {
+      case 'go_to_url':
+        return new NavigateAction(action.url);
+      case 'click_element':
+        return new ClickAction(action.index);
+      case 'input_text':
+        return new InputAction(action.index, action.text);
+      case 'extract_page_content':
+        return new ExtractAction(action.index);
+      case 'done':
+        return new DoneAction(action.result);
+      case 'scroll':
+        return new ScrollAction(action.direction, action.amount);
+      case 'tab':
+        return new TabAction(action.action, action.url, action.page_id);
+      default:
+        throw new Error(`Unknown action: ${actionName}`);
+    }
+  }
+
+  private async handleError(error: Error): Promise<ActionResult> {
+    logger.error(`Error: ${error.message}`);
+    return new ActionResult({
+      isDone: false,
+      extractedContent: null,
+      error: error.message,
+      includeInMemory: true
+    });
+  }
+
+  private async handleRateLimitError(error: Error): Promise<ActionResult> {
+    logger.error(`Rate limit error: ${error.message}`);
+    return new ActionResult({
+      isDone: false,
+      extractedContent: null,
+      error: error.message,
+      includeInMemory: true
+    });
   }
 }

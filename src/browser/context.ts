@@ -86,7 +86,7 @@ export class BrowserContext {
     }
   }
 
-  private async initializeSession(): Promise<BrowserSession> {
+   async initializeSession(): Promise<BrowserSession> {
     logger.debug('Initializing browser context');
 
     const playwrightBrowser = await this.browser.getPlaywrightBrowser();
@@ -123,7 +123,7 @@ export class BrowserContext {
     return session;
   }
 
-  private async addNewPageListener(context: PlaywrightBrowserContext): Promise<void> {
+   async addNewPageListener(context: PlaywrightBrowserContext): Promise<void> {
     context.on('page', async (page: Page) => {
       await page.waitForLoadState();
       logger.debug(`New page opened: ${page.url()}`);
@@ -145,7 +145,7 @@ export class BrowserContext {
     return session.currentPage;
   }
 
-  private async createContext(browser: PlaywrightBrowser): Promise<PlaywrightBrowserContext> {
+   async createContext(browser: PlaywrightBrowser): Promise<PlaywrightBrowserContext> {
     const contexts = browser.contexts();
     if (contexts.length > 0) {
       return contexts[0];
@@ -171,7 +171,7 @@ export class BrowserContext {
     return context;
   }
 
-  private async waitForStableNetwork(): Promise<void> {
+   async waitForStableNetwork(): Promise<void> {
     const page = await this.getCurrentPage();
     const startTime = Date.now();
     let lastRequestTime = startTime;
@@ -207,7 +207,7 @@ export class BrowserContext {
     logger.debug(`Requests: ${requestCount}, Responses: ${responseCount}`);
   }
 
-  private async waitForPageAndFramesLoad(timeoutOverwrite?: number): Promise<void> {
+   async waitForPageAndFramesLoad(timeoutOverwrite?: number): Promise<void> {
     const page = await this.getCurrentPage();
     const timeout = timeoutOverwrite || this.config.maximumWaitPageLoadTime * 1000;
 
@@ -281,7 +281,7 @@ export class BrowserContext {
     }
   }
 
-  private async updateState(useVision = false): Promise<BrowserState> {
+   async updateState(useVision = false): Promise<BrowserState> {
     const page = await this.getCurrentPage();
     const domService = new DomService(page);
 
@@ -335,7 +335,7 @@ export class BrowserContext {
     });
   }
 
-  private convertSimpleXPathToCssSelector(xpath: string): string {
+   convertSimpleXPathToCssSelector(xpath: string): string {
     // Convert simple XPath expressions to CSS selectors
     const match = xpath.match(/^\/\/(\w+)(?:\[@id='([^']+)'\])?(?:\[@class='([^']+)'\])?$/);
     if (!match) return '';
@@ -347,7 +347,7 @@ export class BrowserContext {
     return selector;
   }
 
-  private enhancedCssSelectorForElement(element: DOMElementNode): string {
+   enhancedCssSelectorForElement(element: DOMElementNode): string {
     const selectors: string[] = [];
     let current: DOMElementNode = element;
     let depth = 0;
@@ -414,7 +414,7 @@ export class BrowserContext {
     }
   }
 
-  private async inputTextElementNode(elementNode: DOMElementNode, text: string): Promise<void> {
+   async inputTextElementNode(elementNode: DOMElementNode, text: string): Promise<void> {
     const element = await this.getLocateElement(elementNode);
     if (!element) {
       throw new BrowserError('Element not found');
@@ -425,7 +425,7 @@ export class BrowserContext {
     await element.type(text, { delay: 50 });
   }
 
-  private async clickElementNode(elementNode: DOMElementNode): Promise<void> {
+   async clickElementNode(elementNode: DOMElementNode): Promise<void> {
     const element = await this.getLocateElement(elementNode);
     if (!element) {
       throw new BrowserError('Element not found');

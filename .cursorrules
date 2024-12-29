@@ -1,2 +1,5 @@
 ALLWAYS REFER TO THE ./original-source-NOT_IGNORED FOLDER FOR THE ORIGINAL SOURCE CODE before each code modifications
 Also allways chech wheather a file with the functionaloty you want to implement already exists somewhere
+
+
+NEVER REMOVE COMMENTED SOURCE FROM ANY FILE!

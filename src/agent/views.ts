@@ -8,6 +8,9 @@ import type { DOMElementNode, SelectorMap } from '../dom/views';
 export interface AgentStepInfo {
   stepNumber: number;
   maxSteps: number;
+  stepId: number;
+  stepName: string;
+  stepDescription: string;
 }
 
 export class ActionResult {
@@ -16,8 +19,17 @@ export class ActionResult {
   error: string | null = null;
   includeInMemory = false;
 
-  constructor(data?: Partial<ActionResult>) {
-    Object.assign(this, data);
+  constructor(data?: Partial<ActionResult> | { error: string }) {
+    if (data) {
+      if ('error' in data && typeof data.error === 'string') {
+        this.error = data.error;
+        this.isDone = false;
+        this.extractedContent = null;
+        this.includeInMemory = true;
+      } else {
+        Object.assign(this, data);
+      }
+    }
   }
 
   toJSON() {
@@ -74,6 +86,20 @@ export class AgentOutput {
     this.action = data.action;
   }
 
+  toJSON() {
+    return {
+      current_state: {
+        evaluation_previous_goal: this.currentState.evaluationPreviousGoal,
+        memory: this.currentState.memory,
+        next_goal: this.currentState.nextGoal
+      },
+      action: this.action.map(a => ({
+        name: a.constructor.name,
+        index: a.getIndex()
+      }))
+    };
+  }
+
   static typeWithCustomActions(_customActions: new () => ActionModel): typeof AgentOutput {
     return class extends AgentOutput {
       constructor(data: {
@@ -95,20 +121,6 @@ export class AgentOutput {
       }
     };
   }
-
-  toJSON() {
-    return {
-      current_state: {
-        evaluation_previous_goal: this.currentState.evaluationPreviousGoal,
-        memory: this.currentState.memory,
-        next_goal: this.currentState.nextGoal
-      },
-      action: this.action.map(a => ({
-        name: a.constructor.name,
-        index: a.getIndex()
-      }))
-    };
-  }
 }
 
 export class AgentHistory {
@@ -117,11 +129,25 @@ export class AgentHistory {
   state: BrowserStateHistory;
 
   constructor(data: {
-    modelOutput: AgentOutput | null;
+    modelOutput: {
+      current_state: {
+        evaluation_previous_goal: string;
+        memory: string;
+        next_goal: string;
+      };
+      action: any[];
+    } | null;
     result: ActionResult[];
     state: BrowserStateHistory;
   }) {
-    this.modelOutput = data.modelOutput ? new AgentOutput(data.modelOutput) : null;
+    this.modelOutput = data.modelOutput ? new AgentOutput({
+      current_state: {
+        evaluation_previous_goal: data.modelOutput.current_state.evaluation_previous_goal,
+        memory: data.modelOutput.current_state.memory,
+        next_goal: data.modelOutput.current_state.next_goal
+      },
+      action: data.modelOutput.action
+    }) : null;
     this.result = data.result.map(r => new ActionResult(r));
     this.state = data.state;
   }
@@ -160,7 +186,20 @@ export class AgentHistory {
 export class AgentHistoryList {
   history: AgentHistory[];
 
-  constructor(data: { history: AgentHistory[] }) {
+  constructor(data: {
+    history: Array<{
+      modelOutput: {
+        current_state: {
+          evaluation_previous_goal: string;
+          memory: string;
+          next_goal: string;
+        };
+        action: any[];
+      } | null;
+      result: ActionResult[];
+      state: BrowserStateHistory;
+    }>
+  }) {
     this.history = data.history.map(h => new AgentHistory(h));
   }
 
@@ -191,7 +230,14 @@ export class AgentHistoryList {
     for (const h of data.history) {
       if (h.modelOutput) {
         if (typeof h.modelOutput === 'object') {
-          h.modelOutput = new outputModel(h.modelOutput);
+          h.modelOutput = new outputModel({
+            current_state: {
+              evaluation_previous_goal: h.modelOutput.current_state.evaluation_previous_goal,
+              memory: h.modelOutput.current_state.memory,
+              next_goal: h.modelOutput.current_state.next_goal
+            },
+            action: h.modelOutput.action
+          });
         } else {
           h.modelOutput = null;
         }
@@ -308,10 +354,8 @@ export class AgentHistoryList {
     const outputs = this.modelActions();
     const result: Record<string, any>[] = [];
     for (const o of outputs) {
-      for (const i of include) {
-        if (i === Object.keys(o)[0]) {
-          result.push(o);
-        }
+      if (include.length === 0 || include.includes(o.name)) {
+        result.push(o);
       }
     }
     return result;
