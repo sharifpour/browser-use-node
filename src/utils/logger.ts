@@ -29,4 +29,4 @@ export function getLogger(prefix: string): Logger {
 	return new ConsoleLogger(prefix);
 }
 
-export const logger = getLogger('browser-use');
+export const logger = getLogger('browser-use-node');

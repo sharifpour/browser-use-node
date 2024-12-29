@@ -1,13 +1,26 @@
 /**
  * DOM element node
  */
-export interface DOMElementNode {
-  index: number;
-  tag: string;
+export interface DOMBaseNode {
+  is_visible: boolean;
+  parent: DOMElementNode | null;
+}
+
+export interface DOMTextNode extends DOMBaseNode {
   text: string;
+  type: 'TEXT_NODE';
+}
+
+export interface DOMElementNode extends DOMBaseNode {
+  type: 'ELEMENT_NODE';
+  tag_name: string;
+  xpath: string;
   attributes: Record<string, string>;
   children: DOMElementNode[];
-  is_clickable: boolean;
+  is_interactive: boolean;
+  is_top_element: boolean;
+  shadow_root: boolean;
+  highlight_index: number | null;
 }
 
 /**
@@ -24,16 +37,13 @@ export class DOMElementTree {
 
   private traverse_clickable(node: DOMElementNode, elements: string[], include_attributes: string[]): void {
     // Add current node if clickable
-    if (node.is_clickable) {
+    if (node.is_interactive && node.is_visible && node.is_top_element) {
       const attrs = include_attributes
         .map(attr => node.attributes[attr] ? `${attr}="${node.attributes[attr]}"` : null)
         .filter(Boolean)
         .join(' ');
 
-      elements.push(`${node.index}[:]<${node.tag}${attrs ? ` ${attrs}` : ''}>${node.text}</${node.tag}>`);
-    } else if (node.text.trim()) {
-      // Add non-clickable text nodes for context
-      elements.push(`_[:] ${node.text.trim()}`);
+      elements.push(`${node.highlight_index}[:]<${node.tag_name}${attrs ? ` ${attrs}` : ''}>`);
     }
 
     // Traverse children

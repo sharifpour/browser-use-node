@@ -3,8 +3,8 @@
  */
 
 export * from "./types";
-export { DOMService } from "./service";
-export { DOMObserver } from "./observer";
+export { DomService } from "./service";
+
 
 // Tree processing utilities
 export {

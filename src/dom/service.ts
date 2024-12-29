@@ -1,93 +1,105 @@
 import type { Page } from 'playwright';
-import type { DOMElementNode } from './types';
+import { logger } from '../utils/logger';
+import { buildDomTreeFn } from './buildDomTree';
+import { type DOMBaseNode, DOMElementNode, type DOMState, DOMTextNode, type SelectorMap } from './types';
 
-export class DOMService {
+export class DomService {
 	private readonly page: Page;
+	private readonly xpath_cache: Record<string, any> = {};
 
 	constructor(page: Page) {
 		this.page = page;
 	}
 
-	public async get_state(use_vision = true): Promise<{ elementTree: DOMElementNode[]; selectorMap: Record<number, DOMElementNode> }> {
-		const elementTree = await this.get_element_tree(use_vision);
-		const selectorMap = this.build_selector_map(elementTree);
-		return { elementTree, selectorMap };
+	// region - Clickable elements
+	async get_clickable_elements(highlight_elements = true): Promise<DOMState> {
+		const element_tree = await this._build_dom_tree(highlight_elements);
+		const selector_map = this._create_selector_map(element_tree);
+
+		return {
+			element_tree,
+			selector_map
+		};
 	}
 
-	private async get_element_tree(use_vision = true): Promise<DOMElementNode[]> {
-		const tree = await this.page.evaluate((shouldUseVision) => {
-			function processNode(node: Element): DOMElementNode {
-				const rect = node.getBoundingClientRect();
-				const computedStyle = window.getComputedStyle(node);
-				const isVisible = computedStyle.display !== 'none' && computedStyle.visibility !== 'hidden' && rect.width > 0 && rect.height > 0;
+	private async _build_dom_tree(highlight_elements: boolean): Promise<DOMElementNode> {
+		try {
+			// Inject the buildDomTree function into the page context
+			await this.page.evaluate(`window.buildDomTree = ${buildDomTreeFn}`);
 
-				const attributes: Record<string, string> = {};
-				for (const attr of Array.from(node.attributes)) {
-					attributes[attr.name] = attr.value;
+			// Call the injected function with the parameter
+			const eval_page = await this.page.evaluate(`window.buildDomTree(${highlight_elements})`);
+			const html_to_dict = this._parse_node(eval_page);
+
+			if (!html_to_dict || !(html_to_dict instanceof DOMElementNode)) {
+				throw new Error('Failed to parse HTML to dictionary');
+			}
+
+			return html_to_dict;
+		} catch (error) {
+			logger.error('Error building DOM tree:', error);
+			throw error;
+		}
+	}
+
+	private _create_selector_map(element_tree: DOMElementNode): SelectorMap {
+		const selector_map: SelectorMap = {};
+
+		const process_node = (node: DOMBaseNode): void => {
+			if (node instanceof DOMElementNode && node.highlight_index !== null) {
+				selector_map[node.highlight_index] = node;
+
+				for (const child of node.children) {
+					process_node(child);
 				}
-
-				return {
-					tag: node.tagName.toLowerCase(),
-					text: node.textContent?.trim(),
-					attributes,
-					children: Array.from(node.children).map(child => processNode(child as Element)),
-					xpath: getXPath(node),
-					selector_id: Math.floor(Math.random() * 1000000),
-					is_clickable: isClickable(node),
-					is_visible: isVisible,
-					bounding_box: shouldUseVision ? {
-						x: rect.x,
-						y: rect.y,
-						width: rect.width,
-						height: rect.height
-					} : undefined
-				};
 			}
+		};
 
-			function getXPath(node: Node): string {
-				if (!node.parentNode) return '';
-				const parent = getXPath(node.parentNode);
-				const siblings = Array.from(node.parentNode.childNodes).filter(n => n.nodeName === node.nodeName);
-				const index = siblings.indexOf(node as ChildNode) + 1;
-				return `${parent}/${node.nodeName.toLowerCase()}[${index}]`;
-			}
-
-			function isClickable(node: Element): boolean {
-				const clickableElements = ['a', 'button', 'input', 'select', 'textarea'];
-				if (clickableElements.includes(node.tagName.toLowerCase())) return true;
-
-				const style = window.getComputedStyle(node);
-				if (style.cursor === 'pointer') return true;
-
-				const onclick = node.getAttribute('onclick');
-				if (onclick) return true;
-
-				return false;
-			}
-
-			return Array.from(document.body.children).map(node => processNode(node as Element));
-		}, use_vision);
-
-		return tree;
+		process_node(element_tree);
+		return selector_map;
 	}
 
-	private build_selector_map(elementTree: DOMElementNode[]): Record<number, DOMElementNode> {
-		const map: Record<number, DOMElementNode> = {};
+	private _parse_node(
+		node_data: any,
+		parent: DOMElementNode | null = null
+	): DOMBaseNode | null {
+		if (!node_data) {
+			return null;
+		}
 
-		function traverse(node: DOMElementNode) {
-			map[node.selector_id] = node;
-			for (const child of node.children) {
-				traverse(child);
+		if (node_data.type === 'TEXT_NODE') {
+			return new DOMTextNode({
+				text: node_data.text,
+				is_visible: node_data.isVisible,
+				parent
+			});
+		}
+
+		const element_node = new DOMElementNode({
+			tag_name: node_data.tagName,
+			xpath: node_data.xpath,
+			attributes: node_data.attributes || {},
+			children: [], // Initialize empty, will fill later
+			is_visible: node_data.isVisible ?? false,
+			is_interactive: node_data.isInteractive ?? false,
+			is_top_element: node_data.isTopElement ?? false,
+			highlight_index: node_data.highlightIndex ?? null,
+			shadow_root: node_data.shadowRoot ?? false,
+			parent
+		});
+
+		const children: DOMBaseNode[] = [];
+		for (const child of node_data.children || []) {
+			if (child) {
+				const child_node = this._parse_node(child, element_node);
+				if (child_node) {
+					children.push(child_node);
+				}
 			}
 		}
 
-		for (const node of elementTree) {
-			traverse(node);
-		}
-		return map;
+		element_node.children = children;
+		return element_node;
 	}
-
-	public async cleanup(): Promise<void> {
-	// Nothing to clean up for now
-	}
+	// endregion
 }

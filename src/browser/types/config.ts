@@ -1,5 +1,3 @@
-import type { ProxySettings } from './types';
-
 /**
  * Configuration for the Browser.
  */
@@ -11,15 +9,16 @@ export interface BrowserConfig {
 	headless?: boolean;
 
 	/**
+	 * Disable browser security features
+	 * @default true
+	 */
+	disable_security?: boolean;
+
+	/**
 	 * Extra arguments to pass to the browser
 	 * @default []
 	 */
 	extra_chromium_args?: string[];
-
-	/**
-	 * Path to a Chrome instance to use
-	 */
-	chrome_instance_path?: string;
 
 	/**
 	 * Connect to a browser instance via WebSocket
@@ -27,17 +26,53 @@ export interface BrowserConfig {
 	wss_url?: string;
 
 	/**
-	 * Proxy settings
+	 * Path to a Chrome instance to use
 	 */
-	proxy?: ProxySettings;
+	chrome_instance_path?: string;
 
 	/**
-	 * Ignore HTTPS errors
+	 * Proxy settings
 	 */
-	ignoreHTTPSErrors?: boolean;
+	proxy?: {
+		server: string;
+		username?: string;
+		password?: string;
+	};
+
+	/**
+	 * Browser window size
+	 */
+	browser_window_size?: {
+		width: number;
+		height: number;
+	};
+
+	/**
+	 * Configuration for new browser contexts
+	 */
+	new_context_config?: BrowserContextConfig;
 }
 
 export const defaultConfig: BrowserConfig = {
 	headless: false,
+	disable_security: true,
 	extra_chromium_args: []
 };
+
+export interface BrowserContextConfig {
+	cookies_file?: string;
+	minimum_wait_page_load_time?: number;
+	wait_for_network_idle_page_load_time?: number;
+	maximum_wait_page_load_time?: number;
+	wait_between_actions?: number;
+	disable_security?: boolean;
+	browser_window_size?: {
+		width: number;
+		height: number;
+	};
+	no_viewport?: boolean;
+	save_recording_path?: string;
+	trace_path?: string;
+	page_load_timeout?: number;
+	wait_for_network_idle?: boolean;
+}

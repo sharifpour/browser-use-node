@@ -1,67 +1,44 @@
-/**
- * Tab information
- */
+import type { Page, BrowserContext as PlaywrightContext } from 'playwright';
+import type { DOMElementNode } from '../../dom/types';
+
 export interface TabInfo {
-	id: string;
-	url: string;
+	id: number;
 	title: string;
+	url: string;
 	active: boolean;
 }
 
-/**
- * Browser state
- */
 export interface BrowserState {
+	element_tree: DOMElementNode;
+	selector_map: Record<number, DOMElementNode>;
 	url: string;
+	title: string;
 	content: string;
-	screenshot?: string;
-	dom_tree: import('../../dom/element-tree').DOMElementTree;
 	tabs: TabInfo[];
+	screenshot?: string | null;
 }
 
-/**
- * Proxy settings
- */
-export interface ProxySettings {
-	server: string;
-	username?: string;
-	password?: string;
+export interface BrowserSession {
+	context: PlaywrightContext;
+	current_page: Page;
+	cached_state: BrowserState;
 }
 
-/**
- * Browser context configuration
- */
-export interface BrowserContextConfig {
-	/**
-	 * Whether to disable security features
-	 */
-	disable_security?: boolean;
+export interface DOMState {
+	element_tree: DOMElementNode;
+	selector_map: Record<number, DOMElementNode>;
+}
 
-	/**
-	 * Minimum time to wait for page load
-	 */
-	minimum_wait_page_load_time?: number;
+export interface HashedDomElement {
+	branch_path_hash: string;
+	attributes_hash: string;
+}
 
-	/**
-	 * Maximum time to wait for page load
-	 */
-	maximum_wait_page_load_time?: number;
-
-	/**
-	 * Whether to disable viewport
-	 */
-	no_viewport?: boolean;
-
-	/**
-	 * Browser window size
-	 */
-	browser_window_size?: {
-		width: number;
-		height: number;
-	};
-
-	/**
-	 * Path to save trace
-	 */
-	trace_path?: string;
+export interface DOMHistoryElement {
+	tag_name: string;
+	xpath: string;
+	highlight_index: number | null;
+	entire_parent_branch_path: string[];
+	attributes: Record<string, string>;
+	shadow_root: boolean;
 }

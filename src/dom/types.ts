@@ -2,8 +2,6 @@
  * DOM types and interfaces
  */
 
-import type { HashedDomElement } from './tree-processor';
-
 /**
  * Base DOM node
  */
@@ -11,97 +9,137 @@ export interface DOMBaseNode {
 	/**
 	 * Whether the element is visible
 	 */
-	isVisible: boolean;
+	is_visible: boolean;
 
 	/**
 	 * Parent element
 	 */
 	parent: DOMElementNode | null;
-
-	/**
-	 * Element ID
-	 */
-	id?: string;
-
-	/**
-	 * Element hash
-	 */
-	hash?: HashedDomElement;
 }
 
 /**
  * DOM text node
  */
-export interface DOMTextNode extends DOMBaseNode {
+export class DOMTextNode implements DOMBaseNode {
 	/**
 	 * Node type
 	 */
-	type: 'TEXT_NODE';
+	readonly type = 'TEXT_NODE';
 
 	/**
 	 * Text content
 	 */
-	text: string;
+	readonly text: string;
+
+	/**
+	 * Whether the element is visible
+	 */
+	readonly is_visible: boolean;
+
+	/**
+	 * Parent element
+	 */
+	readonly parent: DOMElementNode | null;
+
+	/**
+	 * Constructor function
+	 */
+	constructor(params: {
+		text: string;
+		is_visible: boolean;
+		parent: DOMElementNode | null;
+	}) {
+		this.text = params.text;
+		this.is_visible = params.is_visible;
+		this.parent = params.parent;
+	}
 }
 
 /**
  * DOM element node
  */
-export interface DOMElementNode {
+export class DOMElementNode implements DOMBaseNode {
 	/**
-	 * Element tag name
+	 * Node type
 	 */
-	tag: string;
+	readonly type = 'ELEMENT_NODE';
 
 	/**
-	 * Element text content
+	 * Tag name
 	 */
-	text?: string;
+	readonly tag_name: string;
 
 	/**
-	 * Element attributes
+	 * XPath
 	 */
-	attributes: Record<string, string>;
+	readonly xpath: string;
 
 	/**
-	 * Element children
+	 * Attributes
 	 */
-	children: DOMElementNode[];
+	readonly attributes: Record<string, string>;
 
 	/**
-	 * Element XPath
+	 * Children
 	 */
-	xpath: string;
+	children: DOMBaseNode[];
 
 	/**
-	 * Element selector ID
+	 * Whether the element is visible
 	 */
-	selector_id: number;
+	readonly is_visible: boolean;
 
 	/**
-	 * Whether element is clickable
+	 * Whether the element is interactive
 	 */
-	is_clickable: boolean;
+	readonly is_interactive: boolean;
 
 	/**
-	 * Whether element is visible
+	 * Whether the element is the top element
 	 */
-	is_visible: boolean;
+	readonly is_top_element: boolean;
 
 	/**
-	 * Element bounding box
+	 * Highlight index
 	 */
-	bounding_box?: {
-		x: number;
-		y: number;
-		width: number;
-		height: number;
-	};
+	readonly highlight_index: number | null;
+
+	/**
+	 * Whether the element has a shadow root
+	 */
+	readonly shadow_root: boolean;
 
 	/**
 	 * Parent element
 	 */
-	parent?: DOMElementNode;
+	readonly parent: DOMElementNode | null;
+
+	/**
+	 * Constructor function
+	 */
+	constructor(params: {
+		tag_name: string;
+		xpath: string;
+		attributes: Record<string, string>;
+		children?: DOMBaseNode[];
+		is_visible: boolean;
+		is_interactive: boolean;
+		is_top_element: boolean;
+		highlight_index: number | null;
+		shadow_root: boolean;
+		parent: DOMElementNode | null;
+	}) {
+		this.tag_name = params.tag_name;
+		this.xpath = params.xpath;
+		this.attributes = params.attributes;
+		this.children = params.children || [];
+		this.is_visible = params.is_visible;
+		this.is_interactive = params.is_interactive;
+		this.is_top_element = params.is_top_element;
+		this.highlight_index = params.highlight_index;
+		this.shadow_root = params.shadow_root;
+		this.parent = params.parent;
+	}
 }
 
 /**
@@ -151,18 +189,15 @@ export interface DOMState {
 	/**
 	 * Element tree
 	 */
-	elementTree: DOMElementNode[];
+	element_tree: DOMElementNode;
 
 	/**
 	 * Selector map
 	 */
-	selectorMap: Record<number, DOMElementNode>;
-
-	/**
-	 * Clickable elements
-	 */
-	clickableElements: DOMElementNode[];
+	selector_map: SelectorMap;
 }
+
+export type SelectorMap = Record<number, DOMElementNode>;
 
 /**
  * File uploader info

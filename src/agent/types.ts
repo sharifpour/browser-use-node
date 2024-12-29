@@ -1,6 +1,8 @@
 import type { ChatOpenAI } from '@langchain/openai';
-import type { BrowserState } from '../browser/types';
-import type { ActionModel } from '../controller/types';
+import type { Browser } from '../browser';
+import type { BrowserContext, BrowserState } from '../browser/types/types';
+import type { Controller } from '../controller';
+import type { ActionModel, ActionResult } from '../controller/types';
 
 /**
  * System prompt class type
@@ -42,8 +44,12 @@ export interface ActionResult {
  * Agent output
  */
 export interface AgentOutput {
-	current_state: AgentBrain;
-	actions: ActionModel[];
+	current_state: {
+		evaluation_previous_goal: string;
+		memory: string;
+		next_goal: string;
+	};
+	action: ActionModel[];
 }
 
 /**
@@ -51,14 +57,14 @@ export interface AgentOutput {
  */
 export interface AgentConfig {
 	task: string;
-	llm: ChatOpenAI;
-	action_descriptions: string;
-	headless?: boolean;
-	max_failures?: number;
-	retry_delay?: number;
+	llm?: ChatOpenAI;
+	browser?: Browser;
+	browser_context?: BrowserContext;
+	controller?: Controller;
 	use_vision?: boolean;
 	save_conversation_path?: string;
-	system_prompt_class?: SystemPromptClass;
+	max_failures?: number;
+	retry_delay?: number;
 	max_input_tokens?: number;
 	validate_output?: boolean;
 	include_attributes?: string[];
@@ -66,15 +72,9 @@ export interface AgentConfig {
 	max_actions_per_step?: number;
 	load_conversation_path?: string;
 	load_history_path?: string;
-	browser_options?: {
-		defaultViewport?: {
-			width: number;
-			height: number;
-		};
-		args?: string[];
-		executablePath?: string;
-		userDataDir?: string;
-	};
+	action_descriptions?: string;
+	browser_options?: Record<string, unknown>;
+	headless?: boolean;
 }
 
 /**
@@ -92,7 +92,7 @@ export interface AgentHistory {
  */
 export interface AgentHistoryList {
 	history: AgentHistory[];
-	is_done(): boolean;
-	final_result(): string | null;
-	save_to_file(path: string): void;
+	is_done: () => boolean;
+	final_result: () => string | null;
+	save_to_file: (path: string) => void;
 }

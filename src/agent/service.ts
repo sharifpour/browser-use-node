@@ -14,7 +14,7 @@ import { logger } from '../utils/logger';
 import { MessageManager } from './message-manager/service';
 import { SystemPrompt } from './prompts/system';
 import type { AgentConfig, AgentHistory, AgentHistoryList, AgentOutput, AgentStepInfo } from './types';
-
+import { ChatOpenAI } from '@langchain/openai';
 export class Agent {
 	private readonly agent_id: string;
 	private readonly task: string;
@@ -39,14 +39,17 @@ export class Agent {
 		this.task = config.task;
 		this.browser = new Browser({
 			headless: config.headless ?? false,
-			ignoreHTTPSErrors: true,
+			disable_security: true,
 			...config.browser_options
 		});
 		this.controller = new Controller();
 		this.telemetry = ProductTelemetry.getInstance();
 		this.messageManager = new MessageManager(
 			config.task,
-			config.llm,
+			config.llm ?? new ChatOpenAI({
+				modelName: 'gpt-4o',
+				openAIApiKey: process.env.OPENAI_API_KEY
+			}),
 			config.action_descriptions ?? '',
 			SystemPrompt,
 			config.max_input_tokens,
@@ -255,7 +258,7 @@ export class Agent {
 			process.on('SIGINT', () => void handleSignal('SIGINT'));
 			process.on('SIGTERM', () => void handleSignal('SIGTERM'));
 
-			await this.browser.initialize();
+			// Initialize browser context
 			this.browserContext = await this.browser.new_context();
 
 			for (let step = 0; step < max_steps; step++) {

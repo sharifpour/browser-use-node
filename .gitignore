@@ -44,5 +44,9 @@ dist/
 dist/*
 dist
 
+results/
+results/*
+results
+
 original-source-NOT_IGNORED/
 original-source-NOT_IGNORED/*
