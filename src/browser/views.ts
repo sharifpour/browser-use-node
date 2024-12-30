@@ -1,4 +1,4 @@
-import type { DOMElementNode } from '../dom/views';
+import type { DOMElementNode, SelectorMap } from '../dom/views';
 
 // Python source reference:
 // """
@@ -37,32 +37,30 @@ import type { DOMElementNode } from '../dom/views';
 // 	screenshot: Optional[str] = None
 // 	tabs: list[TabInfo] = None
 
-export class BrowserError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'BrowserError';
-  }
-}
-
 export interface TabInfo {
   pageId: number;
   url: string;
   title: string;
 }
 
-export interface BrowserState {
-  url: string;
-  title: string;
-  elementTree: DOMElementNode;
-  selectorMap: Record<number, DOMElementNode>;
-  tabs: BrowserTab[];
-  screenshot: string | null;
+export interface BrowserTab extends Omit<TabInfo, 'pageId'> {
+  pageId: string;
 }
 
-export interface BrowserTab {
-  pageId: string;
-  title: string;
+export interface BrowserState {
+  elementTree: DOMElementNode;
+  selectorMap: SelectorMap;
   url: string;
+  title: string;
+  tabs: BrowserTab[];
+  screenshot?: string;
+}
+
+export class BrowserError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'BrowserError';
+  }
 }
 
 export class BrowserStateHistory {

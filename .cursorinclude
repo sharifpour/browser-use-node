@@ -3,3 +3,5 @@
 .cursorignore
 src/
 setup.json
+original-source-NOT_IGNORED/
+original-source-NOT_IGNORED/*

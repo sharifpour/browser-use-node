@@ -67,16 +67,17 @@
 // 		return '\n'.join(elements)
 
 export interface DOMBaseNode {
+  isVisible: boolean;
   parent?: DOMElementNode;
-  hash?: string;
   getAllTextTillNextClickableElement(): string;
 }
 
 export class DOMTextNode implements DOMBaseNode {
   constructor(
     public text: string,
+    public isVisible: boolean,
     public parent?: DOMElementNode,
-    public hash?: string
+    public type: 'TEXT_NODE' = 'TEXT_NODE'
   ) { }
 
   getAllTextTillNextClickableElement(): string {
@@ -90,10 +91,12 @@ export class DOMElementNode implements DOMBaseNode {
     public xpath: string,
     public attributes: Record<string, string>,
     public children: DOMBaseNode[],
-    public parent?: DOMElementNode,
-    public hash?: string,
-    public shadowRoot?: DOMElementNode,
-    public highlightIndex?: number
+    public isVisible: boolean,
+    public isInteractive: boolean,
+    public isTopElement: boolean,
+    public shadowRoot: boolean,
+    public highlightIndex?: number,
+    public parent?: DOMElementNode
   ) { }
 
   getAllTextTillNextClickableElement(): string {
@@ -137,4 +140,62 @@ export type SelectorMap = Record<number, DOMElementNode>;
 export interface DOMState {
   elementTree: DOMElementNode;
   selectorMap: SelectorMap;
+}
+
+export class ElementTreeSerializer {
+  static serializeClickableElements(elementTree: DOMElementNode): string {
+    let result = '';
+
+    function processNode(node: DOMBaseNode, depth: number): void {
+      if (node instanceof DOMElementNode && node.highlightIndex !== undefined) {
+        result += `${node.highlightIndex}[:]<${node.tagName}>${ElementTreeSerializer.getNodeDescription(node)}</${node.tagName}>\n`;
+      }
+
+      if (node instanceof DOMElementNode) {
+        for (const child of node.children) {
+          processNode(child, depth + 1);
+        }
+      }
+    }
+
+    processNode(elementTree, 0);
+    return result;
+  }
+
+  private static getNodeDescription(node: DOMElementNode): string {
+    const attrs = [];
+    for (const [key, value] of Object.entries(node.attributes)) {
+      if (key === 'aria-label' || key === 'role' || key === 'title' || key === 'name' || key === 'placeholder') {
+        attrs.push(`${key}="${value}"`);
+      }
+    }
+    return attrs.length > 0 ? attrs.join(' ') : '';
+  }
+
+  static domElementNodeToJson(elementTree: DOMElementNode): Record<string, any> {
+    function nodeToDict(node: DOMBaseNode): Record<string, any> {
+      if (node instanceof DOMTextNode) {
+        return {
+          type: 'TEXT_NODE',
+          text: node.text,
+          isVisible: node.isVisible
+        };
+      }
+
+      const elementNode = node as DOMElementNode;
+      return {
+        tagName: elementNode.tagName,
+        xpath: elementNode.xpath,
+        attributes: elementNode.attributes,
+        children: elementNode.children.map(nodeToDict),
+        isVisible: elementNode.isVisible,
+        isInteractive: elementNode.isInteractive,
+        isTopElement: elementNode.isTopElement,
+        highlightIndex: elementNode.highlightIndex,
+        shadowRoot: elementNode.shadowRoot
+      };
+    }
+
+    return nodeToDict(elementTree);
+  }
 }

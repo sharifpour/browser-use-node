@@ -1,29 +1,28 @@
 import { ActionResult } from '../../agent/views';
 import type { BrowserContext } from '../../browser/context';
 import { logger } from '../../utils/logging';
-import * as actions from './actions';
+
+import { ClickAction, DoneAction, ExtractAction, InputAction, NavigateAction, ScrollAction, TabAction } from './actions';
 import { ActionModel } from './views';
 
 export class ActionRegistry {
-  private actionMap: Map<string, typeof ActionModel> = new Map();
+  private actionMap: Map<string, { new(...args: any[]): ActionModel; getName(): string; execute(action: any, browserContext: BrowserContext): Promise<ActionResult>; getPromptDescription(): string }> = new Map();
 
   constructor() {
-    this.registerDefaultActions();
+    this.registerAction(NavigateAction);
+    this.registerAction(ClickAction);
+    this.registerAction(InputAction);
+    this.registerAction(ExtractAction);
+    this.registerAction(DoneAction);
+    this.registerAction(ScrollAction);
+    this.registerAction(TabAction);
   }
 
-  registerDefaultActions() {
-    Object.values(actions).forEach((action: any) => {
-      if (action.prototype instanceof ActionModel) {
-        this.registerAction(action);
-      }
-    });
-  }
-
-  registerAction(actionClass: typeof ActionModel): void {
+  registerAction(actionClass: { new(...args: any[]): ActionModel; getName(): string; execute(action: any, browserContext: BrowserContext): Promise<ActionResult>; getPromptDescription(): string }): void {
     this.actionMap.set(actionClass.getName(), actionClass);
   }
 
-  getActionType(name: string): typeof ActionModel | undefined {
+  getActionType(name: string) {
     return this.actionMap.get(name);
   }
 

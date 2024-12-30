@@ -142,42 +142,30 @@ export interface AgentMessagePromptConfig {
 }
 
 export class AgentMessagePrompt {
-  private state: BrowserState;
-  private result?: ActionResult[];
-  private stepInfo?: AgentStepInfo;
-  private includeAttributes: string[];
-  private maxErrorLength: number;
-
-  constructor({
-    state,
-    result,
-    stepInfo,
-    includeAttributes = [],
-    maxErrorLength = 400
-  }: AgentMessagePromptConfig) {
-    this.state = state;
-    this.result = result;
-    this.stepInfo = stepInfo;
-    this.includeAttributes = includeAttributes;
-    this.maxErrorLength = maxErrorLength;
-  }
+  constructor(private config: {
+    state: BrowserState;
+    result?: ActionResult[] | null;
+    stepInfo?: AgentStepInfo;
+    includeAttributes: string[];
+    maxErrorLength: number;
+  }) {}
 
   getUserMessage(): HumanMessage {
     const content: string[] = [];
 
-    if (this.stepInfo) {
+    if (this.config.stepInfo) {
       content.push(
-        `Step ${this.stepInfo.stepId}: ${this.stepInfo.stepName} - ${this.stepInfo.stepDescription}`
+        `Step ${this.config.stepInfo.stepId}: ${this.config.stepInfo.stepName} - ${this.config.stepInfo.stepDescription}`
       );
     }
 
-    if (this.result) {
+    if (this.config.result) {
       content.push('Previous action results:');
-      for (const result of this.result) {
+      for (const result of this.config.result) {
         if (result.error) {
           let error = result.error;
-          if (error.length > this.maxErrorLength) {
-            error = error.slice(0, this.maxErrorLength) + '...';
+          if (error.length > this.config.maxErrorLength) {
+            error = error.slice(0, this.config.maxErrorLength) + '...';
           }
           content.push(`Error: ${error}`);
         }
@@ -188,20 +176,20 @@ export class AgentMessagePrompt {
     }
 
     content.push('Current browser state:');
-    content.push(`URL: ${this.state.url}`);
-    content.push(`Title: ${this.state.title}`);
+    content.push(`URL: ${this.config.state.url}`);
+    content.push(`Title: ${this.config.state.title}`);
 
-    if (this.state.tabs) {
+    if (this.config.state.tabs) {
       content.push('Tabs:');
-      for (const tab of this.state.tabs) {
+      for (const tab of this.config.state.tabs) {
         content.push(`- Tab ${tab.pageId}: ${tab.title} (${tab.url})`);
       }
     }
 
     content.push('Clickable elements:');
     content.push(
-      this.state.elementTree.clickableElementsToString(
-        this.includeAttributes
+      this.config.state.elementTree.clickableElementsToString(
+        this.config.includeAttributes
       )
     );
 

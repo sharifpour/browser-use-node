@@ -59,12 +59,12 @@ export class MessageManager {
 
   addStateMessage(
     state: BrowserState,
-    lastResult?: ActionResult[],
+    result: ActionResult[] | undefined | null,
     stepInfo?: AgentStepInfo
   ): void {
     const content = new AgentMessagePrompt({
       state,
-      result: lastResult,
+      result,
       stepInfo,
       includeAttributes: this.includeAttributes,
       maxErrorLength: this.maxErrorLength

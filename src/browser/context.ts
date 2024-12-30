@@ -6,7 +6,7 @@ import { DomService } from '../dom/service';
 import { DOMElementNode } from '../dom/views';
 import { logger } from '../utils/logging';
 import type { Browser } from './browser';
-import { BrowserError, type BrowserState, type BrowserTab, type TabInfo } from './views';
+import { BrowserError, type BrowserState, type TabInfo } from './views';
 
 export interface BrowserContextWindowSize {
   width: number;
@@ -41,6 +41,7 @@ export class BrowserContext {
   config: BrowserContextConfig;
   browser: Browser;
   session: BrowserSession | null = null;
+  private domService: DomService | null = null;
 
   constructor(
     browser: Browser,
@@ -83,10 +84,11 @@ export class BrowserContext {
       }
     } finally {
       this.session = null;
+      this.domService = null;
     }
   }
 
-   async initializeSession(): Promise<BrowserSession> {
+  async initializeSession(): Promise<BrowserSession> {
     logger.debug('Initializing browser context');
 
     const playwrightBrowser = await this.browser.getPlaywrightBrowser();
@@ -99,16 +101,18 @@ export class BrowserContext {
         '',
         {},
         [],
-        undefined,
-        undefined,
-        undefined,
-        undefined
+        true,  // isVisible
+        false, // isInteractive
+        true,  // isTopElement
+        false, // shadowRoot
+        undefined, // highlightIndex
+        undefined  // parent
       ),
       selectorMap: {},
       url: page.url(),
       title: await page.title(),
-      screenshot: null,
-      tabs: []
+      tabs: [],
+      screenshot: undefined
     };
 
     const session: BrowserSession = {
@@ -123,7 +127,7 @@ export class BrowserContext {
     return session;
   }
 
-   async addNewPageListener(context: PlaywrightBrowserContext): Promise<void> {
+  async addNewPageListener(context: PlaywrightBrowserContext): Promise<void> {
     context.on('page', async (page: Page) => {
       await page.waitForLoadState();
       logger.debug(`New page opened: ${page.url()}`);
@@ -145,7 +149,7 @@ export class BrowserContext {
     return session.currentPage;
   }
 
-   async createContext(browser: PlaywrightBrowser): Promise<PlaywrightBrowserContext> {
+  async createContext(browser: PlaywrightBrowser): Promise<PlaywrightBrowserContext> {
     const contexts = browser.contexts();
     if (contexts.length > 0) {
       return contexts[0];
@@ -171,7 +175,7 @@ export class BrowserContext {
     return context;
   }
 
-   async waitForStableNetwork(): Promise<void> {
+  async waitForStableNetwork(): Promise<void> {
     const page = await this.getCurrentPage();
     const startTime = Date.now();
     let lastRequestTime = startTime;
@@ -207,7 +211,7 @@ export class BrowserContext {
     logger.debug(`Requests: ${requestCount}, Responses: ${responseCount}`);
   }
 
-   async waitForPageAndFramesLoad(timeoutOverwrite?: number): Promise<void> {
+  async waitForPageAndFramesLoad(timeoutOverwrite?: number): Promise<void> {
     const page = await this.getCurrentPage();
     const timeout = timeoutOverwrite || this.config.maximumWaitPageLoadTime * 1000;
 
@@ -271,56 +275,54 @@ export class BrowserContext {
   }
 
   async getState(useVision = false): Promise<BrowserState> {
-    const start = Date.now();
-    try {
-      await this.getSession();
-      return await this.updateState(useVision);
-    } finally {
-      const end = Date.now();
-      logger.debug(`--get_state took ${end - start}ms`);
+    const session = await this.getSession();
+    if (!this.domService) {
+      this.domService = new DomService(session.currentPage);
     }
+    return this.updateState(useVision);
   }
 
-   async updateState(useVision = false): Promise<BrowserState> {
-    const page = await this.getCurrentPage();
-    const domService = new DomService(page);
-
-    const [elementTree, selectorMap] = await Promise.all([
-      domService.getElementTree(page),
-      this.getSelectorMap()
-    ]);
-
-    const screenshot = useVision ? await this.takeScreenshot() : null;
-
-    const state: BrowserState = {
-      elementTree,
-      selectorMap: Object.fromEntries(
-        Object.entries(selectorMap).map(([key, value]) => [Number(key), value as unknown as DOMElementNode])
-      ),
-      url: page.url(),
-      title: await page.title(),
-      screenshot,
-      tabs: (await this.getTabsInfo()).map(tab => ({
-        ...tab,
-        pageId: String(tab.pageId)
-      })) as BrowserTab[]
-    };
-
-    if (this.session) {
-      this.session.cachedState = state;
+  async updateState(useVision = false): Promise<BrowserState> {
+    const session = await this.getSession();
+    if (!this.domService) {
+      this.domService = new DomService(session.currentPage);
     }
 
+    const domState = await this.domService.getClickableElements(useVision);
+    const tabs = await this.getTabsInfo();
+    const url = session.currentPage.url();
+    const title = await session.currentPage.title();
+    const screenshot = useVision ? await this.takeScreenshot() : undefined;
+
+    const state: BrowserState = {
+      elementTree: domState.elementTree,
+      selectorMap: domState.selectorMap,
+      url,
+      title,
+      tabs: tabs.map(tab => ({
+        ...tab,
+        pageId: String(tab.pageId)
+      })),
+      screenshot
+    };
+
+    session.cachedState = state;
     return state;
   }
 
-  async takeScreenshot(fullPage = false): Promise<string> {
-    const page = await this.getCurrentPage();
-    const buffer = await page.screenshot({
-      fullPage,
-      type: 'jpeg',
-      quality: 80
-    });
-    return buffer.toString('base64');
+  async takeScreenshot(fullPage = false): Promise<string | undefined> {
+    const session = await this.getSession();
+    try {
+      const buffer = await session.currentPage.screenshot({
+        fullPage,
+        type: 'jpeg',
+        quality: 80
+      });
+      return buffer.toString('base64');
+    } catch (error) {
+      logger.error(`Failed to take screenshot: ${error}`);
+      return undefined;
+    }
   }
 
   async removeHighlights(): Promise<void> {
@@ -335,7 +337,7 @@ export class BrowserContext {
     });
   }
 
-   convertSimpleXPathToCssSelector(xpath: string): string {
+  convertSimpleXPathToCssSelector(xpath: string): string {
     // Convert simple XPath expressions to CSS selectors
     const match = xpath.match(/^\/\/(\w+)(?:\[@id='([^']+)'\])?(?:\[@class='([^']+)'\])?$/);
     if (!match) return '';
@@ -347,7 +349,7 @@ export class BrowserContext {
     return selector;
   }
 
-   enhancedCssSelectorForElement(element: DOMElementNode): string {
+  enhancedCssSelectorForElement(element: DOMElementNode): string {
     const selectors: string[] = [];
     let current: DOMElementNode = element;
     let depth = 0;
@@ -414,18 +416,30 @@ export class BrowserContext {
     }
   }
 
-   async inputTextElementNode(elementNode: DOMElementNode, text: string): Promise<void> {
-    const element = await this.getLocateElement(elementNode);
-    if (!element) {
-      throw new BrowserError('Element not found');
-    }
+  async inputTextElementNode(elementNode: DOMElementNode, text: string): Promise<void> {
+    try {
+      const page = await this.getCurrentPage();
+      const element = await this.getLocateElement(elementNode);
 
-    await element.click({ clickCount: 3 });
-    await element.press('Backspace');
-    await element.type(text, { delay: 50 });
+      if (!element) {
+        throw new BrowserError(`Element not found: ${elementNode.xpath}`);
+      }
+
+      await element.scrollIntoViewIfNeeded({ timeout: 2500 });
+      await element.fill('');
+      await element.type(text);
+
+      // Wait for potential dynamic updates
+      await page.waitForLoadState('networkidle', { timeout: 2000 }).catch(() => { });
+
+    } catch (error) {
+      throw new BrowserError(
+        `Failed to input text into element: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
 
-   async clickElementNode(elementNode: DOMElementNode): Promise<void> {
+  async clickElementNode(elementNode: DOMElementNode): Promise<void> {
     const element = await this.getLocateElement(elementNode);
     if (!element) {
       throw new BrowserError('Element not found');
@@ -483,15 +497,34 @@ export class BrowserContext {
   }
 
   async getElementByIndex(index: number): Promise<ElementHandle | null> {
-    const page = await this.getCurrentPage();
-    const elements = await page.$$('*');
-    return elements[index] || null;
+    const session = await this.getSession();
+    if (!this.domService) {
+      this.domService = new DomService(session.currentPage);
+    }
+
+    const state = await this.getState();
+    const element = state.selectorMap[index];
+    if (!element) {
+      return null;
+    }
+
+    return this.getLocateElement(element);
   }
 
-  async getDomElementByIndex(index: number): Promise<DOMElementNode | null> {
-    const session = await this.getSession();
-    const element = session.cachedState.elementTree.children[index];
-    return element instanceof DOMElementNode ? element : null;
+  async updateSelectorMap(): Promise<void> {
+    const state = await this.getState();
+    const page = await this.getCurrentPage();
+    const elements = await page.$$('[data-highlight-index]');
+
+    for (const element of elements) {
+      const index = await element.getAttribute('data-highlight-index');
+      if (index) {
+        const elementNode = state.selectorMap[parseInt(index)];
+        if (elementNode) {
+          elementNode.xpath = `[data-highlight-index="${index}"]`;
+        }
+      }
+    }
   }
 
   async saveCookies(): Promise<void> {

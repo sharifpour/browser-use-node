@@ -34,6 +34,8 @@ interface ValidationResult {
   reason: string;
 }
 
+type ActionUnionType = 'go_to_url' | 'click_element' | 'input_text' | 'extract_page_content' | 'done' | 'scroll' | 'tab';
+
 type AgentConfig = {
   task: string;
   llm: ChatOpenAI;
@@ -64,7 +66,7 @@ const defaultBrowserContext = new BrowserContext(defaultBrowser);
 const defaultConfig: AgentConfig = {
   task: '',
   llm: new ChatOpenAI({
-    modelName: 'gpt-4',
+    modelName: 'gpt-4o',
     temperature: 0,
     maxTokens: 1000,
     streaming: false
@@ -197,13 +199,7 @@ export class Agent {
     }
 
     // Register action types with the controller
-    this.controller.registerActionType('go_to_url', NavigateAction);
-    this.controller.registerActionType('click_element', ClickAction);
-    this.controller.registerActionType('input_text', InputAction);
-    this.controller.registerActionType('extract_page_content', ExtractAction);
-    this.controller.registerActionType('done', DoneAction);
-    this.controller.registerActionType('scroll', ScrollAction);
-    this.controller.registerActionType('tab', TabAction);
+
   }
 
   @timeExecutionAsync('step')
@@ -708,35 +704,15 @@ export class Agent {
     this.history.saveToFile(filePath);
   }
 
-  private convertAction(action: any): ActionModel {
-    const actionType = Object.keys(action)[0];
-    const actionData = action[actionType];
+  private convertAction(action: Record<ActionUnionType, ActionModel>): ActionModel {
 
-    // Get the registered action class from the controller
+    const actionType = Object.keys(action)[0] as ActionUnionType;
     const ActionClass = this.controller.getActionType(actionType);
     if (!ActionClass) {
       throw new Error(`Unknown action type: ${actionType}`);
     }
-
     // Create a new instance of the action class with the appropriate parameters
-    switch (actionType) {
-      case 'go_to_url':
-        return new ActionClass(actionData.url);
-      case 'click_element':
-        return new ActionClass(actionData.index);
-      case 'input_text':
-        return new ActionClass(actionData.index, actionData.text);
-      case 'extract_page_content':
-        return new ActionClass(actionData.index);
-      case 'done':
-        return new ActionClass(actionData.result);
-      case 'scroll':
-        return new ActionClass(actionData.direction, actionData.amount);
-      case 'tab':
-        return new ActionClass(actionData.action, actionData.url, actionData.page_id);
-      default:
-        throw new Error(`Unknown action type: ${actionType}`);
-    }
+    this.c
   }
 
   private async handleError(error: Error): Promise<ActionResult> {
