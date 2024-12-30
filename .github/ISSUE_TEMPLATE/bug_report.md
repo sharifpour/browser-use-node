@@ -1,6 +1,6 @@
 ---
-name: Bug Report
-about: Create a report to help us improve
+name: Bug report
+about: Create a report to help us improve browser-use-node
 title: '[BUG] '
 labels: bug
 assignees: ''
@@ -9,30 +9,36 @@ assignees: ''
 ## Bug Description
 <!-- A clear and concise description of what the bug is -->
 
-## Steps to Reproduce
-1.
-2.
-3.
-4.
+## Environment
+- browser-use-node version: <!-- e.g., 0.1.11 -->
+- Node.js version: <!-- e.g., 18.0.0 -->
+- Bun version: <!-- e.g., 1.0.0 -->
+- OS: <!-- e.g., Windows 10, Ubuntu 22.04 -->
+- Browser: <!-- e.g., Chrome 120 -->
+
+## Reproduction Steps
+1. <!-- First Step -->
+2. <!-- Second Step -->
+3. <!-- and so on... -->
 
 ## Expected Behavior
-<!-- A clear and concise description of what you expected to happen -->
+<!-- What you expected to happen -->
 
 ## Actual Behavior
-<!-- A clear and concise description of what actually happened -->
+<!-- What actually happened -->
 
-## Screenshots
-<!-- If applicable, add screenshots to help explain your problem -->
+## Code Example
+```typescript
+// Minimal code that reproduces the issue
+```
 
-## Environment
-- OS: [e.g. macOS 12.0]
-- Node.js version: [e.g. 16.14.0]
-- browser-use-node version: [e.g. 0.1.0]
-- Browser: [e.g. Chrome 96]
-- Playwright version: [e.g. 1.28.0]
+## Error Message
+```
+// If applicable, paste the full error message here
+```
 
 ## Additional Context
 <!-- Add any other context about the problem here -->
-
-## Possible Solution
-<!-- If you have suggestions on a fix for the bug, please describe it here -->
+- [ ] I have searched for existing issues
+- [ ] I have tested with the latest version
+- [ ] I can reproduce this consistently

@@ -1,31 +1,32 @@
 ---
-name: Feature Request
-about: Suggest an idea for this project
+name: Feature request
+about: Suggest an idea for browser-use-node
 title: '[FEATURE] '
 labels: enhancement
 assignees: ''
 ---
 
-## Problem Statement
-<!-- A clear and concise description of what the problem is. Ex. I'm always frustrated when [...] -->
-
-## Proposed Solution
+## Feature Description
 <!-- A clear and concise description of what you want to happen -->
 
+## Use Case
+<!-- Describe the use case or problem this feature would solve -->
+
+## Proposed Solution
+<!-- Describe how you think this could be implemented -->
+
+## Example Usage
+```typescript
+// Example code showing how the feature might be used
+```
+
 ## Alternative Solutions
-<!-- A clear and concise description of any alternative solutions or features you've considered -->
+<!-- Describe any alternative solutions or features you've considered -->
 
 ## Additional Context
 <!-- Add any other context or screenshots about the feature request here -->
 
-## Implementation Ideas
-<!-- If you have specific ideas about how to implement this feature, describe them here -->
-
-## Benefits
-<!-- Describe the benefits this feature would bring to the project -->
-
-## Potential Drawbacks
-<!-- Describe any potential drawbacks or challenges you foresee -->
-
-## Related Issues
-<!-- Link any related issues using #issue_number -->
+## Checklist
+- [ ] I have searched for existing feature requests
+- [ ] This feature aligns with the project's scope
+- [ ] I'm willing to help implement this feature

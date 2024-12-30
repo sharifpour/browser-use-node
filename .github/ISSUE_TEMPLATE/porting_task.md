@@ -1,54 +1,47 @@
 ---
-name: Porting Task
-about: Track a Python to TypeScript conversion task
+name: Porting task
+about: Track the porting of functionality from Python browser-use
 title: '[PORT] '
-labels: porting, help wanted
+labels: port
 assignees: ''
 ---
 
-## Python Component
-<!-- Describe the Python component that needs to be ported -->
-**File(s):**
--
-
-**Component Description:**
-
+## Original Component
+<!-- Link to the original Python component being ported -->
+- File: <!-- e.g., browser/context.py -->
+- Class/Function: <!-- e.g., BrowserContext -->
 
 ## Implementation Details
-<!-- Specific details about the implementation that need attention -->
 
 ### Key Functionality
 <!-- List the key functionality that needs to be preserved -->
--
--
+- [ ] <!-- e.g., Browser session management -->
+- [ ] <!-- e.g., DOM state tracking -->
+
+### TypeScript Considerations
+<!-- List any TypeScript-specific considerations -->
+- [ ] Type definitions
+- [ ] Interface implementations
+- [ ] Generic type parameters
 
 ### Dependencies
-<!-- List any dependencies that need to be considered -->
--
--
+<!-- List required dependencies and their TypeScript equivalents -->
+- [ ] <!-- e.g., Playwright instead of Selenium -->
+- [ ] <!-- e.g., LangChain.js instead of Python LangChain -->
 
-### Challenges
-<!-- Known challenges or differences between Python and TypeScript implementations -->
--
--
+## Testing Requirements
+- [ ] Unit tests ported/created
+- [ ] Integration tests added
+- [ ] Type checking passes
+- [ ] Existing tests unaffected
 
-## Acceptance Criteria
-<!-- What needs to be true for this port to be considered complete -->
-- [ ] All core functionality is preserved
-- [ ] TypeScript types are properly defined
-- [ ] Tests are ported/created
-- [ ] Documentation is updated
-- [ ] port-diff.md is updated
+## Documentation
+- [ ] JSDoc comments added
+- [ ] README updated if needed
+- [ ] API documentation generated
 
-## Related Components
-<!-- List related components or dependencies that might be affected -->
--
-
-## Resources
-<!-- Helpful resources, links, or documentation -->
-- Original Python implementation: [link]
-- Related documentation: [link]
-- TypeScript specific considerations: [link]
-
-## Notes
-<!-- Any additional notes or context -->
+## Checklist
+- [ ] Functionality matches original
+- [ ] TypeScript best practices followed
+- [ ] Tests implemented
+- [ ] Documentation updated
