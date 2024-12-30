@@ -84,7 +84,7 @@ export class AgentOutput {
           return new ActionModelClass({ [actionName]: actionData });
         })
       )
-    });
+    }) as unknown as z.ZodType<AgentOutput>;
   }
 }
 
