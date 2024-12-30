@@ -6,7 +6,6 @@ Browser automation powered by LLMs in JavaScript/TypeScript.
 > This library is currently under heavy development and **NOT READY FOR PRODUCTION USE**.
 > The API is unstable and subject to major changes.
 >
-> If you'd like to help develop this library, please check out [port-diff.md](./port-diff.md) which outlines the current development priorities and areas where help is needed.
 
 ## Overview
 
