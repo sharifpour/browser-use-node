@@ -5,13 +5,13 @@ import * as actions from './actions';
 import { ActionModel } from './views';
 
 export class ActionRegistry {
-  private actions: Map<string, typeof ActionModel> = new Map();
+  private actionMap: Map<string, typeof ActionModel> = new Map();
 
   constructor() {
     this.registerDefaultActions();
   }
 
-  private registerDefaultActions() {
+  registerDefaultActions() {
     Object.values(actions).forEach((action: any) => {
       if (action.prototype instanceof ActionModel) {
         this.registerAction(action);
@@ -20,16 +20,21 @@ export class ActionRegistry {
   }
 
   registerAction(actionClass: typeof ActionModel): void {
-    this.actions.set(actionClass.getName(), actionClass);
+    this.actionMap.set(actionClass.getName(), actionClass);
+  }
+
+  getActionType(name: string): typeof ActionModel | undefined {
+    return this.actionMap.get(name);
   }
 
   async executeAction(
     action: ActionModel,
     browserContext: BrowserContext
   ): Promise<ActionResult> {
-    const actionClass = this.actions.get(action.constructor.name);
+    const actionType = action.getType();
+    const actionClass = this.actionMap.get(actionType);
     if (!actionClass) {
-      throw new Error(`Unknown action: ${action.constructor.name}`);
+      throw new Error(`Unknown action: ${actionType}`);
     }
 
     try {
@@ -53,7 +58,7 @@ export class ActionRegistry {
 
   getPromptDescription(): string {
     const descriptions: string[] = [];
-    for (const actionClass of this.actions.values()) {
+    for (const actionClass of this.actionMap.values()) {
       descriptions.push(actionClass.getPromptDescription());
     }
     return descriptions.join('\n\n');

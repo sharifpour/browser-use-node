@@ -103,6 +103,10 @@ const defaultConfig: AgentConfig = {
   shouldValidateOutput: false
 };
 
+interface ActionWithIndex {
+  getIndex?: () => number;
+}
+
 export class Agent {
   private agentId: string;
   private task: string;
@@ -144,7 +148,7 @@ export class Agent {
     this.saveConversationPath = mergedConfig.saveConversationPath;
     this.includeAttributes = mergedConfig.includeAttributes;
     this.maxErrorLength = mergedConfig.maxErrorLength;
-    this.controller = mergedConfig.controller;
+    this.controller = mergedConfig.controller || new Controller();
     this.maxActionsPerStep = mergedConfig.maxActionsPerStep;
     this.browser = mergedConfig.browser;
     this.browserContext = mergedConfig.browserContext;
@@ -191,6 +195,15 @@ export class Agent {
     if (this.saveConversationPath) {
       logger.info(`Saving conversation to ${this.saveConversationPath}`);
     }
+
+    // Register action types with the controller
+    this.controller.registerActionType('go_to_url', NavigateAction);
+    this.controller.registerActionType('click_element', ClickAction);
+    this.controller.registerActionType('input_text', InputAction);
+    this.controller.registerActionType('extract_page_content', ExtractAction);
+    this.controller.registerActionType('done', DoneAction);
+    this.controller.registerActionType('scroll', ScrollAction);
+    this.controller.registerActionType('tab', TabAction);
   }
 
   @timeExecutionAsync('step')
@@ -205,6 +218,10 @@ export class Agent {
       this.messageManager.addStateMessage(state, this.lastResult, stepInfo);
       const inputMessages = this.messageManager.getMessages();
       modelOutput = await this.getNextAction(inputMessages);
+
+      // Convert the raw actions to ActionModel instances
+      modelOutput.action = modelOutput.action.map(action => this.convertAction(action));
+
       this.saveConversation(inputMessages, modelOutput);
       this.messageManager.removeLastStateMessage();
       this.messageManager.addModelOutput(modelOutput);
@@ -262,7 +279,11 @@ export class Agent {
     result: ActionResult[]
   ): void {
     const interactedElements = modelOutput
-      ? AgentHistory.getInteractedElement(modelOutput, state.selectorMap).map(el => el?.toString() || null)
+      ? this.getInteractedElement(modelOutput, state.selectorMap)
+        .map(el => {
+          if (el === null) return null;
+          return el.toString();
+        })
       : [null];
 
     const stateHistory = new BrowserStateHistory({
@@ -289,10 +310,32 @@ export class Agent {
     this.history.history.push(historyItem);
   }
 
+  private getInteractedElement(output: AgentOutput, selectorMap: Map<number, DOMHistoryElement>): (DOMHistoryElement | null)[] {
+    return output.action.map(action => {
+      // Special handling for NavigateAction
+      if (action instanceof NavigateAction) {
+        return null;
+      }
+
+      const actionWithIndex = action as ActionWithIndex;
+      if (!actionWithIndex.getIndex) {
+        return null;
+      }
+
+      try {
+        const index = actionWithIndex.getIndex();
+        return selectorMap.get(index) || null;
+      } catch (error) {
+        logger.debug(`Failed to get index for action ${action.constructor.name}: ${error}`);
+        return null;
+      }
+    });
+  }
+
   @timeExecutionAsync('getNextAction')
   private async getNextAction(inputMessages: BaseMessage[]): Promise<AgentOutput> {
     logger.info(`Input messages: ${JSON.stringify(inputMessages)}`);
-    // @ts-expect-error - LangChain types don't include bind method with function calling
+
     const structuredLlm = this.llm.bind({
       functions: [{
         name: 'agent_action',
@@ -313,7 +356,61 @@ export class Agent {
               type: 'array',
               items: {
                 type: 'object',
-                additionalProperties: true
+                properties: {
+                  go_to_url: {
+                    type: 'object',
+                    properties: {
+                      url: { type: 'string' }
+                    },
+                    required: ['url']
+                  },
+                  click_element: {
+                    type: 'object',
+                    properties: {
+                      index: { type: 'number' }
+                    },
+                    required: ['index']
+                  },
+                  input_text: {
+                    type: 'object',
+                    properties: {
+                      index: { type: 'number' },
+                      text: { type: 'string' }
+                    },
+                    required: ['index', 'text']
+                  },
+                  extract_page_content: {
+                    type: 'object',
+                    properties: {
+                      index: { type: 'number' }
+                    },
+                    required: ['index']
+                  },
+                  done: {
+                    type: 'object',
+                    properties: {
+                      result: { type: 'string' }
+                    },
+                    required: ['result']
+                  },
+                  scroll: {
+                    type: 'object',
+                    properties: {
+                      direction: { type: 'string' },
+                      amount: { type: 'number' }
+                    },
+                    required: ['direction', 'amount']
+                  },
+                  tab: {
+                    type: 'object',
+                    properties: {
+                      action: { type: 'string' },
+                      url: { type: 'string' },
+                      page_id: { type: 'string' }
+                    },
+                    required: ['action']
+                  }
+                }
               }
             }
           },
@@ -323,7 +420,6 @@ export class Agent {
       function_call: { name: 'agent_action' }
     });
 
-    logger.info(`Structured LLM: ${JSON.stringify(structuredLlm)}`);
     const response = await structuredLlm.invoke(inputMessages);
     logger.info(`Raw response: ${JSON.stringify(response)}`);
 
@@ -334,6 +430,21 @@ export class Agent {
     try {
       const parsed = JSON.parse(response.additional_kwargs.function_call.arguments);
       logger.info(`Response parsed: ${JSON.stringify(parsed)}`);
+
+      // Ensure the action array exists and has the correct format
+      if (!parsed.action) {
+        parsed.action = [];
+      }
+
+      // Add initial navigation action if on blank page
+      if (this.nSteps === 1) {
+        parsed.action = [{
+          go_to_url: {
+            url: 'https://google.com'
+          }
+        }];
+      }
+
       const output = new AgentOutput(parsed);
       logger.info(`Parsed: ${JSON.stringify(output)}`);
       output.action = output.action.slice(0, this.maxActionsPerStep);
@@ -598,24 +709,33 @@ export class Agent {
   }
 
   private convertAction(action: any): ActionModel {
-    const actionName = action.name.toLowerCase();
-    switch (actionName) {
+    const actionType = Object.keys(action)[0];
+    const actionData = action[actionType];
+
+    // Get the registered action class from the controller
+    const ActionClass = this.controller.getActionType(actionType);
+    if (!ActionClass) {
+      throw new Error(`Unknown action type: ${actionType}`);
+    }
+
+    // Create a new instance of the action class with the appropriate parameters
+    switch (actionType) {
       case 'go_to_url':
-        return new NavigateAction(action.url);
+        return new ActionClass(actionData.url);
       case 'click_element':
-        return new ClickAction(action.index);
+        return new ActionClass(actionData.index);
       case 'input_text':
-        return new InputAction(action.index, action.text);
+        return new ActionClass(actionData.index, actionData.text);
       case 'extract_page_content':
-        return new ExtractAction(action.index);
+        return new ActionClass(actionData.index);
       case 'done':
-        return new DoneAction(action.result);
+        return new ActionClass(actionData.result);
       case 'scroll':
-        return new ScrollAction(action.direction, action.amount);
+        return new ActionClass(actionData.direction, actionData.amount);
       case 'tab':
-        return new TabAction(action.action, action.url, action.page_id);
+        return new ActionClass(actionData.action, actionData.url, actionData.page_id);
       default:
-        throw new Error(`Unknown action: ${actionName}`);
+        throw new Error(`Unknown action type: ${actionType}`);
     }
   }
 

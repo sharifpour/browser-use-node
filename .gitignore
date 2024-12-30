@@ -50,3 +50,8 @@ results
 
 original-source-NOT_IGNORED/
 original-source-NOT_IGNORED/*
+
+
+tmp/
+tmp/*
+tmp

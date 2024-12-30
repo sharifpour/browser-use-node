@@ -2,10 +2,11 @@ import type { ActionResult } from '../agent/views';
 import type { BrowserContext } from '../browser/context';
 import { logger } from '../utils/logging';
 import { ActionRegistry } from './registry/service';
-import type { ActionModel } from './registry/views';
+import { ActionModel } from './registry/views';
 
 export class Controller {
   private registry: ActionRegistry;
+  private actionTypes: Map<string, typeof ActionModel> = new Map();
 
   constructor(registry?: ActionRegistry) {
     this.registry = registry || new ActionRegistry();
@@ -31,5 +32,13 @@ export class Controller {
 
   getPromptDescription(): string {
     return this.registry.getPromptDescription();
+  }
+
+  registerActionType(name: string, actionClass: typeof ActionModel) {
+    this.actionTypes.set(name, actionClass);
+  }
+
+  getActionType(name: string): typeof ActionModel | undefined {
+    return this.actionTypes.get(name);
   }
 }

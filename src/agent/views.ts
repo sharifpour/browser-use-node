@@ -2,6 +2,7 @@ import { mkdir, readFileSync, writeFileSync } from 'fs';
 import { RateLimitError } from 'openai';
 import { dirname } from 'path';
 import type { BrowserStateHistory } from '../browser/views';
+import { NavigateAction } from '../controller/registry/actions';
 import type { ActionModel } from '../controller/registry/views';
 import type { DOMElementNode, SelectorMap } from '../dom/views';
 
@@ -93,10 +94,18 @@ export class AgentOutput {
         memory: this.currentState.memory,
         next_goal: this.currentState.nextGoal
       },
-      action: this.action.map(a => ({
-        name: a.constructor.name,
-        index: a.getIndex()
-      }))
+      action: this.action.map(a => {
+        if (a instanceof NavigateAction) {
+          return {
+            name: a.constructor.name,
+            url: a.url
+          };
+        }
+        return {
+          name: a.constructor.name,
+          index: 'getIndex' in a ? a.getIndex() : undefined
+        };
+      })
     };
   }
 
@@ -254,9 +263,18 @@ export class AgentHistoryList {
     if (this.history.length && this.history[this.history.length - 1].modelOutput) {
       const lastHistory = this.history[this.history.length - 1];
       const lastAction = lastHistory.modelOutput!.action[lastHistory.modelOutput!.action.length - 1];
+
+      // Handle actions that don't have getIndex
+      if (lastAction.constructor.name === 'NavigateAction') {
+        return {
+          name: lastAction.constructor.name,
+          url: lastAction.url
+        };
+      }
+
       return {
         name: lastAction.constructor.name,
-        index: lastAction.getIndex()
+        index: lastAction.getIndex?.() // Make getIndex optional
       };
     }
     return null;
@@ -324,10 +342,17 @@ export class AgentHistoryList {
     for (const h of this.history) {
       if (h.modelOutput) {
         for (const action of h.modelOutput.action) {
-          outputs.push({
-            name: action.constructor.name,
-            index: action.getIndex()
-          });
+          if (action instanceof NavigateAction) {
+            outputs.push({
+              name: action.constructor.name,
+              url: action.url
+            });
+          } else {
+            outputs.push({
+              name: action.constructor.name,
+              index: 'getIndex' in action ? action.getIndex() : undefined
+            });
+          }
         }
       }
     }
