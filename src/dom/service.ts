@@ -3,11 +3,7 @@ import { join } from 'path';
 import type { Page } from 'playwright';
 import { DOMBaseNode, DOMElementNode, DOMState, DOMTextNode, SelectorMap } from './types';
 
-declare global {
-  interface Window {
-    getDomTree: (highlightElements: boolean) => any;
-  }
-}
+
 
 export class DomService {
   private readonly page: Page;
@@ -37,7 +33,7 @@ export class DomService {
     await this.page.evaluate(domScript);
 
     const htmlToDict = await this.page.evaluate((highlightElements: boolean) => {
-      return window.getDomTree(highlightElements);
+      return (window as unknown as { getDomTree: (highlightElements: boolean) => any }).getDomTree(highlightElements);
     }, highlightElements);
 
     const parsedDict = this.parseNode(htmlToDict);

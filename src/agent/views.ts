@@ -22,7 +22,7 @@ export class ActionResult {
     }
   }
 
-  toJSON() {
+  toJSON(): Record<string, any> {
     return {
       isDone: this.isDone,
       extractedContent: this.extractedContent,
@@ -47,7 +47,7 @@ export class AgentBrain {
     this.nextGoal = data.nextGoal;
   }
 
-  toJSON() {
+  toJSON(): Record<string, any> {
     return {
       evaluationPreviousGoal: this.evaluationPreviousGoal,
       memory: this.memory,
@@ -65,7 +65,8 @@ export class AgentOutput {
     this.action = data.action;
   }
 
-  static typeWithCustomActions(ActionModelClass: typeof ActionModel) {
+  static typeWithCustomActions(ActionModelClass: typeof ActionModel): z.ZodType<AgentOutput> {
+
     return z.object({
       currentState: z.object({
         evaluation_previous_goal: z.string(),
