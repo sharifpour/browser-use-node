@@ -1,4 +1,4 @@
-# Contributor Covenant Code of Conduct
+# Code of Conduct
 
 ## Our Pledge
 
@@ -9,21 +9,23 @@ identity and expression, level of experience, education, socio-economic status,
 nationality, personal appearance, race, religion, or sexual identity
 and orientation.
 
+We pledge to act and interact in ways that contribute to an open, welcoming,
+diverse, inclusive, and healthy community.
+
 ## Our Standards
 
-Examples of behavior that contributes to a positive environment for our
-community include:
+Examples of behavior that contributes to a positive environment:
 
-* Demonstrating empathy and kindness toward other people
-* Being respectful of differing opinions, viewpoints, and experiences
-* Giving and gracefully accepting constructive feedback
-* Accepting responsibility and apologizing to those affected by our mistakes
-* Focusing on what is best for the overall community
+* Using welcoming and inclusive language
+* Being respectful of differing viewpoints and experiences
+* Gracefully accepting constructive criticism
+* Focusing on what is best for the community
+* Showing empathy towards other community members
 
-Examples of unacceptable behavior include:
+Examples of unacceptable behavior:
 
 * The use of sexualized language or imagery, and sexual attention or advances
-* Trolling, insulting or derogatory comments, and personal or political attacks
+* Trolling, insulting/derogatory comments, and personal or political attacks
 * Public or private harassment
 * Publishing others' private information without explicit permission
 * Other conduct which could reasonably be considered inappropriate in a professional setting
@@ -43,8 +45,11 @@ an individual is officially representing the community in public spaces.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainers. All complaints will be reviewed and
-investigated promptly and fairly.
+reported to the project maintainers responsible for enforcement at
+[INSERT CONTACT METHOD].
+
+Project maintainers will review and investigate all complaints, and will
+respond in a way that they deem appropriate to the circumstances.
 
 ## Attribution
 

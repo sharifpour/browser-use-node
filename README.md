@@ -6,6 +6,7 @@ Browser automation powered by LLMs in JavaScript/TypeScript.
 > This library is currently under heavy development and **NOT READY FOR PRODUCTION USE**.
 > The API is unstable and subject to major changes.
 >
+> See [ROADMAP.md](./ROADMAP.md) for the current development status and priorities.
 
 ## Overview
 
@@ -122,14 +123,13 @@ Bun is used as the primary runtime because it provides:
 ```bash
 # Building
 bun run build           # Build the project
-bun run build:binary    # Build as native binary
-bun run build:examples  # Build example files
 bun run clean          # Clean build artifacts
 
 # Development
 bun run type-check     # Run TypeScript type checking
 bun run format         # Format code with Prettier
-bun run lint           # Run ESLint
+bun run lint          # Run ESLint
+bun run prepare        # Run build before publishing
 
 # Examples
 bun run example:amazon     # Run Amazon search example
@@ -139,6 +139,14 @@ bun run example:simple     # Run simple example
 # Testing
 bun run test           # Run all tests
 bun run test:smoke     # Run smoke tests
+
+# Documentation
+bun run docs:dev       # Start documentation development server
+bun run docs:build     # Build documentation
+bun run docs:serve     # Serve built documentation
+bun run docs:clear     # Clear documentation cache
+bun run docs:generate-api # Generate API documentation
+bun run docs           # Generate API docs, build and serve
 ```
 
 ### Build Outputs
@@ -241,3 +249,22 @@ We welcome contributions! Please see our [Contributing Guidelines](./CONTRIBUTIN
 ## Security
 
 We take security seriously. If you discover a security vulnerability, please follow our [Security Policy](./SECURITY.md) for responsible disclosure.
+
+### Dependencies
+
+- Node.js 16+
+- Bun (for development)
+- Required packages:
+  - Playwright ^1.49.1
+  - LangChain ^0.1.0
+  - @langchain/openai ^0.0.10
+  - Other dependencies as listed in package.json
+
+### Development Dependencies
+
+- TypeScript ^5.3.3
+- ESLint ^8.56.0
+- Prettier ^3.1.1
+- Various type definitions (@types/*)
+
+> Current Version: 0.1.11

@@ -2,33 +2,21 @@
 
 ## Supported Versions
 
-> ⚠️ This project is currently under heavy development and not ready for production use.
-> Once we reach a stable release, this section will be updated with supported versions.
+Currently, as the project is in early development (v0.1.11), only the latest version receives security updates.
+
+| Version | Supported          |
+| ------- | ------------------ |
+| 0.1.x   | :white_check_mark: |
+| < 0.1   | :x:                |
 
 ## Reporting a Vulnerability
 
-We take the security of browser-use-node seriously. If you believe you have found a security vulnerability, please follow these steps:
+If you discover a security vulnerability in browser-use-node, please:
 
-1. **DO NOT** open a public issue on GitHub
-2. Send a description of the vulnerability to dankov.kiev@gmail.com
-   - Include steps to reproduce the vulnerability
-   - Include the version of browser-use-node where you found the vulnerability
-   - If possible, include a proof of concept
-   - If known, include potential impacts of the vulnerability
-
-## What to Expect
-
-
-
-When you report a vulnerability:
-
-1. You will receive an acknowledgment within 48 hours
-2. We will investigate and provide an initial assessment within 7 days
-3. We will keep you informed about our progress
-4. Once the vulnerability is fixed, we will:
-   - Notify you
-   - Release a security advisory
-   - Credit you (unless you prefer to remain anonymous)
+1. **Do Not** open a public issue
+2. Email the security team at [INSERT SECURITY EMAIL]
+3. Include detailed information about the vulnerability
+4. Wait for a response (usually within 48 hours)
 
 ## Security Best Practices
 
