@@ -4,7 +4,7 @@ import { Controller } from '../src/controller/service';
 
 async function main() {
   const agent = new Agent({
-    task: 'Go to google.com, search for Atlantic Wiz band from kiev and give me the names of the members',
+    task: 'Go to google.com, search for How much is the fish? and give me the answer',
     useVision: true,
     saveConversationPath: './tmp',
     maxFailures: 1,
