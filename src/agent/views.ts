@@ -1,18 +1,7 @@
-import { mkdir, readFileSync, writeFileSync } from 'fs';
-import { RateLimitError } from 'openai';
-import { dirname } from 'path';
+import { z } from 'zod';
 import type { BrowserStateHistory } from '../browser/views';
-import { NavigateAction } from '../controller/registry/actions';
 import type { ActionModel } from '../controller/registry/views';
-import type { DOMElementNode, SelectorMap } from '../dom/views';
-
-export interface AgentStepInfo {
-  stepNumber: number;
-  maxSteps: number;
-  stepId: number;
-  stepName: string;
-  stepDescription: string;
-}
+import type { DOMElementNode } from '../dom/types';
 
 export class ActionResult {
   isDone = false;
@@ -71,192 +60,84 @@ export class AgentOutput {
   currentState: AgentBrain;
   action: ActionModel[];
 
-  constructor(data: {
-    current_state: {
+  constructor(data: { currentState: AgentBrain; action: ActionModel[] }) {
+    this.currentState = new AgentBrain(data.currentState);
+    this.action = data.action;
+  }
+
+  static typeWithCustomActions(ActionModelClass: typeof ActionModel) {
+    return z.object({
+      currentState: z.object({
+        evaluation_previous_goal: z.string(),
+        memory: z.string(),
+        next_goal: z.string()
+      }).transform(data => ({
+        evaluationPreviousGoal: data.evaluation_previous_goal,
+        memory: data.memory,
+        nextGoal: data.next_goal
+      })),
+      action: z.array(
+        z.object({}).catchall(z.record(z.any())).transform(data => {
+          const actionName = Object.keys(data)[0];
+          const actionData = data[actionName];
+          return new ActionModelClass({ [actionName]: actionData });
+        })
+      )
+    });
+  }
+}
+
+export interface AgentStepInfo {
+  stepNumber: number;
+  maxSteps: number;
+}
+
+export class AgentHistory {
+  modelOutput: {
+    currentState: {
       evaluation_previous_goal: string;
       memory: string;
       next_goal: string;
     };
-    action: any[];
-  }) {
-    this.currentState = new AgentBrain({
-      evaluationPreviousGoal: data.current_state.evaluation_previous_goal,
-      memory: data.current_state.memory,
-      nextGoal: data.current_state.next_goal
-    });
-    this.action = data.action;
-  }
-
-  toJSON() {
-    return {
-      current_state: {
-        evaluation_previous_goal: this.currentState.evaluationPreviousGoal,
-        memory: this.currentState.memory,
-        next_goal: this.currentState.nextGoal
-      },
-      action: this.action.map(a => {
-        if (a instanceof NavigateAction) {
-          return {
-            name: a.constructor.name,
-            url: a.url
-          };
-        }
-        return {
-          name: a.constructor.name,
-          index: 'getIndex' in a ? a.getIndex() : undefined
-        };
-      })
-    };
-  }
-
-  static typeWithCustomActions(_customActions: new () => ActionModel): typeof AgentOutput {
-    return class extends AgentOutput {
-      constructor(data: {
-        current_state: {
-          evaluation_previous_goal: string;
-          memory: string;
-          next_goal: string;
-        };
-        action: any[];
-      }) {
-        super({
-          current_state: {
-            evaluation_previous_goal: data.current_state.evaluation_previous_goal,
-            memory: data.current_state.memory,
-            next_goal: data.current_state.next_goal
-          },
-          action: data.action
-        });
-      }
-    };
-  }
-}
-
-export class AgentHistory {
-  modelOutput: AgentOutput | null;
+    action: ActionModel[];
+  } | null;
   result: ActionResult[];
   state: BrowserStateHistory;
 
   constructor(data: {
     modelOutput: {
-      current_state: {
+      currentState: {
         evaluation_previous_goal: string;
         memory: string;
         next_goal: string;
       };
-      action: any[];
+      action: ActionModel[];
     } | null;
     result: ActionResult[];
     state: BrowserStateHistory;
   }) {
-    this.modelOutput = data.modelOutput ? new AgentOutput({
-      current_state: {
-        evaluation_previous_goal: data.modelOutput.current_state.evaluation_previous_goal,
-        memory: data.modelOutput.current_state.memory,
-        next_goal: data.modelOutput.current_state.next_goal
-      },
-      action: data.modelOutput.action
-    }) : null;
-    this.result = data.result.map(r => new ActionResult(r));
+    this.modelOutput = data.modelOutput;
+    this.result = data.result;
     this.state = data.state;
   }
 
   static getInteractedElement(
     modelOutput: AgentOutput,
-    selectorMap: SelectorMap
+    selectorMap: Record<number, DOMElementNode>
   ): (DOMElementNode | null)[] {
-    const elements: (DOMElementNode | null)[] = [];
-    for (const action of modelOutput.action) {
-      const index = action.getIndex();
-      if (index && index in selectorMap) {
-        const el: DOMElementNode = selectorMap[index];
-        elements.push(el);
-      } else {
-        elements.push(null);
-      }
-    }
-    return elements;
-  }
-
-  toJSON() {
-    let modelOutputDump = null;
-    if (this.modelOutput) {
-      modelOutputDump = this.modelOutput.toJSON();
-    }
-
-    return {
-      modelOutput: modelOutputDump,
-      result: this.result.map(r => r.toJSON()),
-      state: this.state.toDict()
-    };
+    return modelOutput.action.map(action => {
+      const index = action.getIndex?.();
+      if (index === null || index === undefined) return null;
+      return selectorMap[index] || null;
+    });
   }
 }
 
 export class AgentHistoryList {
   history: AgentHistory[];
 
-  constructor(data: {
-    history: Array<{
-      modelOutput: {
-        current_state: {
-          evaluation_previous_goal: string;
-          memory: string;
-          next_goal: string;
-        };
-        action: any[];
-      } | null;
-      result: ActionResult[];
-      state: BrowserStateHistory;
-    }>
-  }) {
-    this.history = data.history.map(h => new AgentHistory(h));
-  }
-
-  toString(): string {
-    return `AgentHistoryList(allResults=${this.actionResults()}, allModelOutputs=${this.modelActions()})`;
-  }
-
-  saveToFile(filePath: string): void {
-    const data = this.toJSON();
-    // Ensure directory exists
-    const dir = dirname(filePath);
-    mkdir(dir, { recursive: true }, (err) => {
-      if (err) throw err;
-      writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
-    });
-  }
-
-  toJSON() {
-    return {
-      history: this.history.map(h => h.toJSON())
-    };
-  }
-
-  static loadFromFile(filePath: string, outputModel: typeof AgentOutput): AgentHistoryList {
-    const data = JSON.parse(readFileSync(filePath, 'utf-8'));
-
-    // Loop through history and validate output_model actions to enrich with custom actions
-    for (const h of data.history) {
-      if (h.modelOutput) {
-        if (typeof h.modelOutput === 'object') {
-          h.modelOutput = new outputModel({
-            current_state: {
-              evaluation_previous_goal: h.modelOutput.current_state.evaluation_previous_goal,
-              memory: h.modelOutput.current_state.memory,
-              next_goal: h.modelOutput.current_state.next_goal
-            },
-            action: h.modelOutput.action
-          });
-        } else {
-          h.modelOutput = null;
-        }
-      }
-      if (!('interactedElement' in h.state)) {
-        h.state.interactedElement = null;
-      }
-    }
-
-    return new AgentHistoryList(data);
+  constructor(data: { history: AgentHistory[] }) {
+    this.history = data.history;
   }
 
   lastAction(): Record<string, any> | null {
@@ -268,7 +149,7 @@ export class AgentHistoryList {
       if (lastAction.constructor.name === 'NavigateAction') {
         return {
           name: lastAction.constructor.name,
-          url: lastAction.url
+          url: (lastAction as any).url
         };
       }
 
@@ -314,11 +195,11 @@ export class AgentHistoryList {
   }
 
   urls(): string[] {
-    return this.history.filter(h => h.state.toDict().url).map(h => h.state.toDict().url);
+    return this.history.filter(h => h.state.url).map(h => h.state.url);
   }
 
   screenshots(): string[] {
-    return this.history.filter(h => h.state.toDict().screenshot).map(h => h.state.toDict().screenshot!);
+    return this.history.filter(h => h.state.screenshot).map(h => h.state.screenshot!);
   }
 
   actionNames(): string[] {
@@ -328,80 +209,36 @@ export class AgentHistoryList {
   modelThoughts(): AgentBrain[] {
     return this.history
       .filter(h => h.modelOutput)
-      .map(h => h.modelOutput!.currentState);
+      .map(h => new AgentBrain({
+        evaluationPreviousGoal: h.modelOutput!.currentState.evaluation_previous_goal,
+        memory: h.modelOutput!.currentState.memory,
+        nextGoal: h.modelOutput!.currentState.next_goal
+      }));
   }
 
   modelOutputs(): AgentOutput[] {
     return this.history
       .filter(h => h.modelOutput)
-      .map(h => h.modelOutput!);
+      .map(h => new AgentOutput({
+        currentState: new AgentBrain({
+          evaluationPreviousGoal: h.modelOutput!.currentState.evaluation_previous_goal,
+          memory: h.modelOutput!.currentState.memory,
+          nextGoal: h.modelOutput!.currentState.next_goal
+        }),
+        action: h.modelOutput!.action
+      }));
   }
 
-  modelActions(): Record<string, any>[] {
-    const outputs: Record<string, any>[] = [];
-    for (const h of this.history) {
-      if (h.modelOutput) {
-        for (const action of h.modelOutput.action) {
-          if (action instanceof NavigateAction) {
-            outputs.push({
-              name: action.constructor.name,
-              url: action.url
-            });
-          } else {
-            outputs.push({
-              name: action.constructor.name,
-              index: 'getIndex' in action ? action.getIndex() : undefined
-            });
-          }
-        }
-      }
-    }
-    return outputs;
-  }
-
-  actionResults(): ActionResult[] {
-    const results: ActionResult[] = [];
-    for (const h of this.history) {
-      results.push(...h.result.filter(r => r));
-    }
-    return results;
-  }
-
-  extractedContent(): string[] {
-    const content: string[] = [];
-    for (const h of this.history) {
-      content.push(...h.result.filter(r => r.extractedContent).map(r => r.extractedContent!));
-    }
-    return content;
-  }
-
-  modelActionsFiltered(include: string[] = []): Record<string, any>[] {
-    const outputs = this.modelActions();
-    const result: Record<string, any>[] = [];
-    for (const o of outputs) {
-      if (include.length === 0 || include.includes(o.name)) {
-        result.push(o);
-      }
-    }
-    return result;
+  modelActions(): ActionModel[] {
+    return this.history
+      .filter(h => h.modelOutput)
+      .flatMap(h => h.modelOutput!.action);
   }
 }
 
 export class AgentError extends Error {
-  static VALIDATION_ERROR = 'Invalid model output format. Please follow the correct schema.';
-  static RATE_LIMIT_ERROR = 'Rate limit reached. Waiting before retry.';
-  static NO_VALID_ACTION = 'No valid action found';
-
-  static formatError(error: Error, includeTrace = false): string {
-    if (error instanceof Error && error.name === 'ValidationError') {
-      return `${AgentError.VALIDATION_ERROR}\nDetails: ${error.message}`;
-    }
-    if (error instanceof RateLimitError) {
-      return AgentError.RATE_LIMIT_ERROR;
-    }
-    if (includeTrace) {
-      return `${error.message}\nStacktrace:\n${error.stack}`;
-    }
-    return error.message;
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentError';
   }
 }

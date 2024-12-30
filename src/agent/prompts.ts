@@ -1,26 +1,31 @@
-import { HumanMessage } from 'langchain/schema';
+import { HumanMessage, SystemMessage } from 'langchain/schema';
 import type { BrowserState } from '../browser/views';
+import type { DOMElementNode } from '../dom/types';
 import type { ActionResult, AgentStepInfo } from './views';
 
 export interface SystemPromptConfig {
-  task: string;
-  actionDescriptions: string;
-  maxActionsPerStep: number;
+  actionDescription: string;
+  currentDate?: Date;
+  maxActionsPerStep?: number;
 }
 
 export class SystemPrompt {
-  private task: string;
-  private actionDescriptions: string;
+  private actionDescription: string;
+  private currentDate: Date;
   private maxActionsPerStep: number;
 
-  constructor({ task, actionDescriptions, maxActionsPerStep }: SystemPromptConfig) {
-    this.task = task;
-    this.actionDescriptions = actionDescriptions;
+  constructor({
+    actionDescription,
+    currentDate = new Date(),
+    maxActionsPerStep = 10
+  }: SystemPromptConfig) {
+    this.actionDescription = actionDescription;
+    this.currentDate = currentDate;
     this.maxActionsPerStep = maxActionsPerStep;
   }
 
   private importantRules(): string {
-    return `
+    const text = `
 1. RESPONSE FORMAT: You must ALWAYS respond with valid JSON in this exact format:
    {
      "current_state": {
@@ -87,8 +92,8 @@ export class SystemPrompt {
    - If content only disappears the sequence continues.
    - Only provide the action sequence until you think the page will change.
    - Try to be efficient, e.g. fill forms at once, or chain actions where nothing changes on the page like saving, extracting, checkboxes...
-   - only use multiple actions if it makes sense.
-   - use maximum ${this.maxActionsPerStep} actions per sequence`;
+   - only use multiple actions if it makes sense.`;
+    return text + `\n   - use maximum ${this.maxActionsPerStep} actions per sequence`;
   }
 
   private inputFormat(): string {
@@ -97,102 +102,99 @@ INPUT STRUCTURE:
 1. Current URL: The webpage you're currently on
 2. Available Tabs: List of open browser tabs
 3. Interactive Elements: List in the format:
-   index[:]<element_type>element_text</element_type>
-   - index: Numeric identifier for interaction
-   - element_type: HTML element type (button, input, etc.)
-   - element_text: Visible text or element description
-
-Example:
-33[:]<button>Submit Form</button>
-_[:] Non-interactive text
-
-Notes:
-- Only elements with numeric indexes are interactive
-- _[:] elements provide context but cannot be interacted with`;
+   index[:]<element_type>element_text</element_type>`;
   }
 
-  getPrompt(): string {
-    const currentDate = new Date();
-    const timeStr = currentDate.toLocaleString();
-
-    return `You are a precise browser automation agent that interacts with websites through structured commands. Your role is to:
-1. Analyze the provided webpage elements and structure
-2. Plan a sequence of actions to accomplish the given task
-3. Respond with valid JSON containing your action sequence and state assessment
-
-Current date and time: ${timeStr}
-
-${this.inputFormat()}
-
-${this.importantRules()}
-
-Functions:
-${this.actionDescriptions}
-
-Remember: Your responses must be valid JSON matching the specified format. Each action in the sequence must be valid.`;
+  getSystemMessage(): SystemMessage {
+    return new SystemMessage(
+      `${this.importantRules()}\n\n${this.inputFormat()}\n\n${this.actionDescription}`
+    );
   }
 }
 
 export interface AgentMessagePromptConfig {
   state: BrowserState;
-  result?: ActionResult[];
-  stepInfo?: AgentStepInfo;
+  result?: ActionResult[] | null;
   includeAttributes?: string[];
   maxErrorLength?: number;
+  stepInfo?: AgentStepInfo | null;
 }
 
 export class AgentMessagePrompt {
-  constructor(private config: {
-    state: BrowserState;
-    result?: ActionResult[] | null;
-    stepInfo?: AgentStepInfo;
-    includeAttributes: string[];
-    maxErrorLength: number;
-  }) {}
+  private state: BrowserState;
+  private result: ActionResult[] | null;
+  private includeAttributes: string[];
+  private maxErrorLength: number;
+  private stepInfo: AgentStepInfo | null;
+
+  constructor({
+    state,
+    result = null,
+    includeAttributes = [],
+    maxErrorLength = 400,
+    stepInfo = null
+  }: AgentMessagePromptConfig) {
+    this.state = state;
+    this.result = result;
+    this.includeAttributes = includeAttributes;
+    this.maxErrorLength = maxErrorLength;
+    this.stepInfo = stepInfo;
+  }
 
   getUserMessage(): HumanMessage {
-    const content: string[] = [];
+    let content = '';
 
-    if (this.config.stepInfo) {
-      content.push(
-        `Step ${this.config.stepInfo.stepId}: ${this.config.stepInfo.stepName} - ${this.config.stepInfo.stepDescription}`
-      );
+    // Add step info if available
+    if (this.stepInfo) {
+      content += `Step ${this.stepInfo.stepNumber} of ${this.stepInfo.maxSteps}\n\n`;
     }
 
-    if (this.config.result) {
-      content.push('Previous action results:');
-      for (const result of this.config.result) {
-        if (result.error) {
-          let error = result.error;
-          if (error.length > this.config.maxErrorLength) {
-            error = error.slice(0, this.config.maxErrorLength) + '...';
+    // Add current URL
+    content += `Current URL: ${this.state.url}\n\n`;
+
+    // Add available tabs
+    content += 'Available tabs:\n';
+    content += this.state.tabs.map(tab => `- ${tab.url}`).join('\n') + '\n\n';
+
+    // Add interactive elements
+    content += 'Interactive elements:\n';
+    content += this.getInteractiveElements() + '\n\n';
+
+    // Add previous action results if any
+    if (this.result && this.result.length > 0) {
+      content += 'Previous action results:\n';
+      content += this.result.map(r => {
+        let resultStr = '';
+        if (r.isDone) resultStr += 'Done: ';
+        if (r.extractedContent) resultStr += r.extractedContent;
+        if (r.error) resultStr += `Error: ${r.error.slice(-this.maxErrorLength)}`;
+        return resultStr;
+      }).join('\n') + '\n\n';
+    }
+
+    return new HumanMessage(content);
+  }
+
+  private getInteractiveElements(): string {
+    const elements: string[] = [];
+    const processNode = (node: DOMElementNode): void => {
+      if (node.highlightIndex !== null) {
+        let elementStr = `${node.highlightIndex}[:]<${node.tagName}>`;
+        for (const attr of this.includeAttributes) {
+          if (attr in node.attributes) {
+            elementStr += ` ${attr}="${node.attributes[attr]}"`;
           }
-          content.push(`Error: ${error}`);
         }
-        if (result.extractedContent) {
-          content.push(`Extracted content: ${result.extractedContent}`);
+        elementStr += `</${node.tagName}>`;
+        elements.push(elementStr);
+      }
+      for (const child of node.children) {
+        if ('tagName' in child) {
+          processNode(child as DOMElementNode);
         }
       }
-    }
-
-    content.push('Current browser state:');
-    content.push(`URL: ${this.config.state.url}`);
-    content.push(`Title: ${this.config.state.title}`);
-
-    if (this.config.state.tabs) {
-      content.push('Tabs:');
-      for (const tab of this.config.state.tabs) {
-        content.push(`- Tab ${tab.pageId}: ${tab.title} (${tab.url})`);
-      }
-    }
-
-    content.push('Clickable elements:');
-    content.push(
-      this.config.state.elementTree.clickableElementsToString(
-        this.config.includeAttributes
-      )
-    );
-
-    return new HumanMessage(content.join('\n'));
+    };
+    processNode(this.state.elementTree);
+    return elements.join('\n');
   }
 }

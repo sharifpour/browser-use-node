@@ -1,10 +1,18 @@
-import type { ActionResult } from '../../../agent/views';
+import { ActionResult } from '../../../agent/views';
 import type { BrowserContext } from '../../../browser/context';
 import { ActionModel } from '../views';
 
 export class ExtractAction extends ActionModel {
-  constructor(public index?: number) {
+  index?: number;
+
+  constructor(data?: Record<string, any>) {
     super();
+    if (data && data.index !== undefined) {
+      if (typeof data.index !== 'number') {
+        throw new Error('Index must be a number');
+      }
+      this.index = data.index;
+    }
   }
 
   static getName(): string {
@@ -20,8 +28,8 @@ Example:
   {"extract_page_content": {"index": 1}}`;
   }
 
-  getIndex(): number | undefined {
-    return this.index;
+  getIndex(): number | null {
+    return this.index ?? null;
   }
 
   setIndex(index: number): void {
@@ -32,16 +40,37 @@ Example:
     action: ExtractAction,
     browserContext: BrowserContext
   ): Promise<ActionResult> {
-    if (action.index !== undefined) {
-      const element = await browserContext.getDomElementByIndex(action.index);
-      if (!element) {
-        return { error: `Element with index ${action.index} not found` };
+    try {
+      if (action.index !== undefined) {
+        const element = await browserContext.getElementByIndex(action.index);
+        if (!element) {
+          return new ActionResult({
+            error: `Element with index ${action.index} not found`,
+            includeInMemory: true
+          });
+        }
+        const text = await element.textContent() || '';
+        return new ActionResult({
+          isDone: false,
+          extractedContent: text,
+          error: null,
+          includeInMemory: true
+        });
       }
-      return { extractedContent: element.getAllTextTillNextClickableElement() };
-    }
 
-    const page = await browserContext.getCurrentPage();
-    const content = await page.$eval('body', el => el.textContent || '');
-    return { extractedContent: content };
+      const page = await browserContext.getCurrentPage();
+      const content = await page.$eval('body', el => el.textContent || '');
+      return new ActionResult({
+        isDone: false,
+        extractedContent: content,
+        error: null,
+        includeInMemory: true
+      });
+    } catch (error) {
+      return new ActionResult({
+        error: error instanceof Error ? error.message : String(error),
+        includeInMemory: true
+      });
+    }
   }
 }

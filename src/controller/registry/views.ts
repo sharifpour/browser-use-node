@@ -1,14 +1,56 @@
-import type { ActionResult } from '../../agent/views';
-import type { BrowserContext } from '../../browser/context';
+export class ActionModelBase {
+  name!: string;
 
-export abstract class ActionModel {
-  abstract static getName(): string;
-  abstract static execute(action: ActionModel, browserContext: BrowserContext): Promise<ActionResult>;
+  constructor(data?: Record<string, any>) {
+    if (data) {
+      Object.assign(this, data);
+    }
+  }
 
-  abstract getIndex(): number | undefined;
-  abstract setIndex(index: number): void;
+  getIndex(): number | null {
+    const params = Object.values(this)[0];
+    if (!params) return null;
+    return 'index' in params ? params.index : null;
+  }
 
-  getType(): string {
-    return (this.constructor as typeof ActionModel).getName();
+  setIndex(index: number): void {
+    const actionName = Object.keys(this)[0];
+    const params = this[actionName as keyof this];
+    if (params && typeof params === 'object' && 'index' in params) {
+      (params as { index: number }).index = index;
+    }
+  }
+}
+
+export class ActionModel extends ActionModelBase {
+  static getName(): string {
+    return this.name;
+  }
+
+  override getIndex(): number | null {
+    return super.getIndex();
+  }
+
+  override setIndex(index: number): void {
+    super.setIndex(index);
+  }
+}
+
+export interface RegisteredAction {
+  name: string;
+  description: string;
+  function: (...args: any[]) => Promise<any>;
+  paramModel: new (data?: Record<string, any>) => ActionModel;
+  requiresBrowser: boolean;
+  promptDescription(): string;
+}
+
+export class ActionRegistry {
+  actions: Map<string, RegisteredAction> = new Map();
+
+  getPromptDescription(): string {
+    return Array.from(this.actions.values())
+      .map(action => action.promptDescription())
+      .join('\n');
   }
 }

@@ -10,6 +10,8 @@ export interface MessageManagerConfig {
   actionDescriptions: string;
   systemPromptClass?: typeof SystemPrompt;
   maxInputTokens?: number;
+  estimatedTokensPerCharacter?: number;
+  imageTokens?: number;
   includeAttributes?: string[];
   maxErrorLength?: number;
   maxActionsPerStep?: number;
@@ -21,10 +23,13 @@ export class MessageManager {
   private actionDescriptions: string;
   private systemPromptClass: typeof SystemPrompt;
   private maxInputTokens: number;
+  private estimatedTokensPerCharacter: number;
+  private imageTokens: number;
   private includeAttributes: string[];
   private maxErrorLength: number;
   private maxActionsPerStep: number;
   private messages: BaseMessage[] = [];
+  private systemPrompt!: SystemMessage;
 
   constructor({
     llm,
@@ -32,6 +37,8 @@ export class MessageManager {
     actionDescriptions,
     systemPromptClass = SystemPrompt,
     maxInputTokens = 128000,
+    estimatedTokensPerCharacter = 3,
+    imageTokens = 800,
     includeAttributes = [],
     maxErrorLength = 400,
     maxActionsPerStep = 10
@@ -41,39 +48,65 @@ export class MessageManager {
     this.actionDescriptions = actionDescriptions;
     this.systemPromptClass = systemPromptClass;
     this.maxInputTokens = maxInputTokens;
+    this.estimatedTokensPerCharacter = estimatedTokensPerCharacter;
+    this.imageTokens = imageTokens;
     this.includeAttributes = includeAttributes;
     this.maxErrorLength = maxErrorLength;
     this.maxActionsPerStep = maxActionsPerStep;
 
     this.addSystemMessage();
+    this.addTaskMessage();
   }
 
   private addSystemMessage(): void {
     const systemPrompt = new this.systemPromptClass({
-      task: this.task,
-      actionDescriptions: this.actionDescriptions,
+      actionDescription: this.actionDescriptions,
       maxActionsPerStep: this.maxActionsPerStep
     });
-    this.messages.push(new SystemMessage(systemPrompt.getPrompt()));
+    const message = systemPrompt.getSystemMessage();
+    this.systemPrompt = message;
+    this.addMessageWithTokens(message);
+  }
+
+  private addTaskMessage(): void {
+    const message = new HumanMessage(`Your task is: ${this.task}`);
+    this.addMessageWithTokens(message);
   }
 
   addStateMessage(
     state: BrowserState,
-    result: ActionResult[] | undefined | null,
+    result?: ActionResult[] | null,
     stepInfo?: AgentStepInfo
   ): void {
+    // Add memory items first
+    if (result) {
+      for (const r of result) {
+        if (r.includeInMemory) {
+          if (r.extractedContent) {
+            const msg = new HumanMessage(String(r.extractedContent));
+            this.addMessageWithTokens(msg);
+          }
+          if (r.error) {
+            const msg = new HumanMessage(String(r.error).slice(-this.maxErrorLength));
+            this.addMessageWithTokens(msg);
+          }
+          result = undefined; // if result in history, we don't want to add it again
+        }
+      }
+    }
+
     const content = new AgentMessagePrompt({
       state,
       result,
-      stepInfo,
       includeAttributes: this.includeAttributes,
-      maxErrorLength: this.maxErrorLength
+      maxErrorLength: this.maxErrorLength,
+      stepInfo
     });
-    this.messages.push(content.getUserMessage());
+    this.addMessageWithTokens(content.getUserMessage());
   }
 
   addModelOutput(modelOutput: AgentOutput): void {
-    this.messages.push(
+    this.addMessageWithTokens(
       new HumanMessage(JSON.stringify(modelOutput))
     );
   }
@@ -83,7 +116,9 @@ export class MessageManager {
   }
 
   removeLastStateMessage(): void {
-    this.messages.pop();
+    if (this.messages.length > 2 && this.messages[this.messages.length - 1] instanceof HumanMessage) {
+      this.messages.pop();
+    }
   }
 
   cutMessages(): void {
@@ -91,11 +126,31 @@ export class MessageManager {
       return;
     }
 
-    while (
-      this.llm.getNumTokensFromMessages(this.messages) > this.maxInputTokens &&
-      this.messages.length > 2
-    ) {
+    while (this.countTotalTokens() > this.maxInputTokens && this.messages.length > 2) {
       this.messages.splice(1, 1);
     }
+  }
+
+  setMaxInputTokens(tokens: number): void {
+    this.maxInputTokens = tokens;
+  }
+
+  private addMessageWithTokens(message: BaseMessage): void {
+    this.messages.push(message);
+  }
+
+  private countTotalTokens(): number {
+    return this.messages.reduce((total, msg) => {
+      return total + this.countTokens(msg);
+    }, 0);
+  }
+
+  private countTokens(message: BaseMessage): number {
+    const text = typeof message.content === 'string' ? message.content : JSON.stringify(message.content);
+    return this.countTextTokens(text);
+  }
+
+  private countTextTokens(text: string): number {
+    return Math.ceil(text.length * this.estimatedTokensPerCharacter);
   }
 }

@@ -1,8 +1,8 @@
 {
 	"compilerOptions": {
-		"target": "ES2020",
-		"module": "commonjs",
-		"lib": ["ES2020", "DOM"],
+		"target": "ESNext",
+		"module": "ESNext",
+		"lib": ["ESNext", "DOM", "ES2020"],
 		"experimentalDecorators": true,
 		"emitDecoratorMetadata": true,
 		"declaration": true,
@@ -12,7 +12,12 @@
 		"esModuleInterop": true,
 		"skipLibCheck": true,
 		"forceConsistentCasingInFileNames": true,
-		"moduleResolution": "node"
+		"moduleResolution": "node",
+		"allowSyntheticDefaultImports": true,
+		"baseUrl": ".",
+		"paths": {
+			"*": ["src/*"]
+		}
 	},
 	"include": ["src/**/*", "examples/**/*"],
 	"exclude": ["node_modules", "dist"]

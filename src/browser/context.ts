@@ -3,9 +3,8 @@ import { dirname, join } from 'path';
 import type { BrowserContextOptions, ElementHandle, Page, Browser as PlaywrightBrowser, BrowserContext as PlaywrightBrowserContext } from 'playwright';
 import { v4 as uuidv4 } from 'uuid';
 import { DomService } from '../dom/service';
-import { DOMElementNode } from '../dom/views';
+import { DOMElementNode } from '../dom/types';
 import { logger } from '../utils/logging';
-import type { Browser } from './browser';
 import { BrowserError, type BrowserState, type TabInfo } from './views';
 
 export interface BrowserContextWindowSize {
@@ -39,12 +38,12 @@ interface BrowserSession {
 export class BrowserContext {
   contextId: string;
   config: BrowserContextConfig;
-  browser: Browser;
+  browser: PlaywrightBrowser;
   session: BrowserSession | null = null;
   private domService: DomService | null = null;
 
   constructor(
-    browser: Browser,
+    browser: PlaywrightBrowser,
     config: BrowserContextConfig = new BrowserContextConfig()
   ) {
     this.contextId = uuidv4();
@@ -91,22 +90,21 @@ export class BrowserContext {
   async initializeSession(): Promise<BrowserSession> {
     logger.debug('Initializing browser context');
 
-    const playwrightBrowser = await this.browser.getPlaywrightBrowser();
-    const context = await this.createContext(playwrightBrowser);
+    const context = await this.createContext(this.browser);
     const page = await context.newPage();
 
     const initialState: BrowserState = {
       elementTree: new DOMElementNode(
-        'root',
-        '',
-        {},
-        [],
         true,  // isVisible
-        false, // isInteractive
-        true,  // isTopElement
-        false, // shadowRoot
-        undefined, // highlightIndex
-        undefined  // parent
+        'root', // tagName
+        '',     // xpath
+        {},     // attributes
+        [],     // children
+        false,  // isInteractive
+        true,   // isTopElement
+        false,  // shadowRoot
+        null,   // highlightIndex
+        null    // parent
       ),
       selectorMap: {},
       url: page.url(),
@@ -230,8 +228,21 @@ export class BrowserContext {
 
   async navigateTo(url: string): Promise<void> {
     const page = await this.getCurrentPage();
-    await page.goto(url);
-    await this.waitForPageAndFramesLoad();
+    try {
+      logger.debug(`Navigating to ${url}`);
+      const response = await page.goto(url);
+      if (!response) {
+        throw new Error('Navigation failed - no response received');
+      }
+      if (!response.ok()) {
+        throw new Error(`Navigation failed with status ${response.status()}: ${response.statusText()}`);
+      }
+      logger.debug(`Successfully navigated to ${url}`);
+      await this.waitForPageAndFramesLoad();
+    } catch (error) {
+      logger.error(`Navigation failed: ${error}`);
+      throw new BrowserError(`Failed to navigate to ${url}: ${error}`);
+    }
   }
 
   async refreshPage(): Promise<void> {
@@ -271,7 +282,7 @@ export class BrowserContext {
 
   async executeJavaScript<T>(script: string): Promise<T> {
     const page = await this.getCurrentPage();
-    return await page.evaluate(script);
+    return await page.evaluate(script) as T;
   }
 
   async getState(useVision = false): Promise<BrowserState> {
@@ -288,7 +299,7 @@ export class BrowserContext {
       this.domService = new DomService(session.currentPage);
     }
 
-    const domState = await this.domService.getClickableElements(useVision);
+    const domState = await this.domService.getDomState(useVision);
     const tabs = await this.getTabsInfo();
     const url = session.currentPage.url();
     const title = await session.currentPage.title();
@@ -300,8 +311,9 @@ export class BrowserContext {
       url,
       title,
       tabs: tabs.map(tab => ({
-        ...tab,
-        pageId: String(tab.pageId)
+        pageId: Number(tab.pageId),
+        url: tab.url,
+        title: tab.title
       })),
       screenshot
     };
@@ -383,7 +395,7 @@ export class BrowserContext {
       }
 
       selectors.unshift(selector);
-      const nextParent: DOMElementNode | undefined = current.parent;
+      const nextParent = current.parent;
       if (!nextParent || !(nextParent instanceof DOMElementNode)) {
         break;
       }
@@ -425,7 +437,7 @@ export class BrowserContext {
         throw new BrowserError(`Element not found: ${elementNode.xpath}`);
       }
 
-      await element.scrollIntoViewIfNeeded({ timeout: 2500 });
+      await element.scrollIntoViewIfNeeded();
       await element.fill('');
       await element.type(text);
 

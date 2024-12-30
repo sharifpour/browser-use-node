@@ -1,10 +1,17 @@
-import type { ActionResult } from '../../../agent/views';
+import { ActionResult } from '../../../agent/views';
 import type { BrowserContext } from '../../../browser/context';
 import { ActionModel } from '../views';
 
 export class NavigateAction extends ActionModel {
-  constructor(public url: string) {
+  url: string;
+
+  constructor(data?: Record<string, any>) {
     super();
+    if (data && typeof data.url === 'string') {
+      this.url = data.url;
+    } else {
+      throw new Error('URL is required for navigate action');
+    }
   }
 
   static getName(): string {
@@ -19,8 +26,8 @@ Example:
   {"go_to_url": {"url": "https://example.com"}}`;
   }
 
-  getIndex(): number | undefined {
-    return undefined;
+  getIndex(): number | null {
+    return null;
   }
 
   setIndex(_index: number): void {
@@ -33,9 +40,9 @@ Example:
   ): Promise<ActionResult> {
     try {
       await browserContext.navigateTo(action.url);
-      return {};
+      return new ActionResult({});
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) };
+      return new ActionResult({ error: error instanceof Error ? error.message : String(error) });
     }
   }
 }

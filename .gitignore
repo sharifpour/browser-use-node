@@ -35,10 +35,28 @@ Thumbs.db
 
 browser-use-main-git/
 
-original-source
-original-source/
-original-source-NOT_IGNORED/
-original-source-NOT_IGNORED/*
+# original-source
+# original-source/
+# original-source-NOT_IGNORED/
+# original-source-NOT_IGNORED/*
+src-python
+python-examples
+test-python
+python-tests
+
+src-python/
+python-examples/
+test-python/
+python-tests/
+
+
+src-python/*
+python-examples/*
+test-python/*
+python-tests/*
+
+*.py
+
 
 dist/
 dist/*
@@ -48,8 +66,8 @@ results/
 results/*
 results
 
-original-source-NOT_IGNORED/
-original-source-NOT_IGNORED/*
+# original-source-NOT_IGNORED/
+# original-source-NOT_IGNORED/*
 
 
 tmp/

@@ -1,18 +1,32 @@
 import { ActionResult } from '../../../agent/views';
 import type { BrowserContext } from '../../../browser/context';
-import { logger } from '../../../utils/logging';
 import { ActionModel } from '../views';
 
-export class InputAction extends ActionModel {
-  constructor(
-    public index: number,
-    public text: string
-  ) {
+export class InputTextAction extends ActionModel {
+  index: number;
+  text: string;
+
+  constructor(data?: Record<string, any>) {
     super();
+    if (data && typeof data.index === 'number' && typeof data.text === 'string') {
+      this.index = data.index;
+      this.text = data.text;
+    } else {
+      throw new Error('Index and text are required for input text action');
+    }
   }
 
   static getName(): string {
     return 'input_text';
+  }
+
+  static getPromptDescription(): string {
+    return `input_text: Input text into an element
+Parameters:
+  - index: Index of the element to input text into
+  - text: Text to input
+Example:
+  {"input_text": {"index": 1, "text": "Hello World"}}`;
   }
 
   getIndex(): number {
@@ -23,43 +37,30 @@ export class InputAction extends ActionModel {
     this.index = index;
   }
 
-  static getPromptDescription(): string {
-    return `input_text: Input text into an element
-Parameters:
-  - index: Index of the element to input text into
-  - text: Text to input
-Example:
-  {"input_text": {"index": 1, "text": "Hello, world!"}}`;
-  }
-
   static async execute(
-    action: InputAction,
+    action: InputTextAction,
     browserContext: BrowserContext
   ): Promise<ActionResult> {
     try {
-      const session = await browserContext.getSession();
-      const state = session.cachedState;
-
-      const elementNode = state.selectorMap[action.index];
-      if (!elementNode) {
+      const element = await browserContext.getElementByIndex(action.index);
+      if (!element) {
         return new ActionResult({
-          error: `Element index ${action.index} does not exist - retry or use alternative actions`
+          error: `Element with index ${action.index} not found`,
+          includeInMemory: true
         });
       }
 
-      await browserContext.inputTextElementNode(elementNode, action.text);
-      const msg = `⌨️  Input "${action.text}" into index ${action.index}`;
-      logger.info(msg);
-      logger.debug(`Element xpath: ${elementNode.xpath}`);
-
+      await element.fill(action.text);
       return new ActionResult({
-        isDone: true,
-        extractedContent: msg,
+        isDone: false,
+        extractedContent: `Input text "${action.text}" into element ${action.index}`,
+        error: null,
         includeInMemory: true
       });
     } catch (error) {
       return new ActionResult({
-        error: `Failed to input text: ${error instanceof Error ? error.message : String(error)}`
+        error: error instanceof Error ? error.message : String(error),
+        includeInMemory: true
       });
     }
   }

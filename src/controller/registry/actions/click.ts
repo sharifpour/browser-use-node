@@ -3,8 +3,15 @@ import type { BrowserContext } from '../../../browser/context';
 import { ActionModel } from '../views';
 
 export class ClickAction extends ActionModel {
-  constructor(public index: number) {
+  index: number;
+
+  constructor(data?: Record<string, any>) {
     super();
+    if (data && typeof data.index === 'number') {
+      this.index = data.index;
+    } else {
+      throw new Error('Index is required for click action');
+    }
   }
 
   static getName(): string {

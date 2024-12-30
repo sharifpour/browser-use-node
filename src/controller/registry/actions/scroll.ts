@@ -1,13 +1,27 @@
-import type { ActionResult } from '../../../agent/views';
+import { ActionResult } from '../../../agent/views';
 import type { BrowserContext } from '../../../browser/context';
 import { ActionModel } from '../views';
 
 export class ScrollAction extends ActionModel {
-  constructor(
-    public direction: 'up' | 'down',
-    public amount?: number
-  ) {
+  direction: 'up' | 'down';
+  amount?: number;
+
+  constructor(data?: Record<string, any>) {
     super();
+    if (data) {
+      if (data.direction !== 'up' && data.direction !== 'down') {
+        throw new Error('Direction must be "up" or "down"');
+      }
+      this.direction = data.direction;
+      if (data.amount !== undefined) {
+        if (typeof data.amount !== 'number') {
+          throw new Error('Amount must be a number');
+        }
+        this.amount = data.amount;
+      }
+    } else {
+      throw new Error('Direction is required for scroll action');
+    }
   }
 
   static getName(): string {
@@ -24,8 +38,8 @@ Example:
   {"scroll": {"direction": "up", "amount": 500}}`;
   }
 
-  getIndex(): number | undefined {
-    return undefined;
+  getIndex(): number | null {
+    return null;
   }
 
   setIndex(_index: number): void {
@@ -49,10 +63,21 @@ Example:
         amount = -amount;
       }
 
-      await page.evaluate(`window.scrollBy(0, ${amount})`);
-      return {};
+      await page.evaluate((scrollAmount: number) => {
+        window.scrollBy(0, scrollAmount);
+      }, amount);
+
+      return new ActionResult({
+        isDone: false,
+        extractedContent: `Scrolled ${action.direction} by ${Math.abs(amount)}px`,
+        error: null,
+        includeInMemory: true
+      });
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) };
+      return new ActionResult({
+        error: error instanceof Error ? error.message : String(error),
+        includeInMemory: true
+      });
     }
   }
 }

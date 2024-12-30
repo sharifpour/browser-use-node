@@ -1,10 +1,17 @@
-import type { ActionResult } from '../../../agent/views';
+import { ActionResult } from '../../../agent/views';
 import type { BrowserContext } from '../../../browser/context';
 import { ActionModel } from '../views';
 
 export class DoneAction extends ActionModel {
-  constructor(public result: string) {
+  result: string;
+
+  constructor(data?: Record<string, any>) {
     super();
+    if (data && typeof data.result === 'string') {
+      this.result = data.result;
+    } else {
+      throw new Error('Result is required for done action');
+    }
   }
 
   static getName(): string {
@@ -19,8 +26,8 @@ Example:
   {"done": {"result": "Task completed successfully"}}`;
   }
 
-  getIndex(): number | undefined {
-    return undefined;
+  getIndex(): number | null {
+    return null;
   }
 
   setIndex(_index: number): void {
@@ -31,9 +38,9 @@ Example:
     action: DoneAction,
     _browserContext: BrowserContext
   ): Promise<ActionResult> {
-    return {
+    return new ActionResult({
       extractedContent: action.result,
       isDone: true
-    };
+    });
   }
 }

@@ -1,40 +1,51 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { Page } from 'playwright';
-import { DOMBaseNode, DOMElementNode, DOMState, DOMTextNode, SelectorMap } from './views';
+import type { Page } from 'playwright';
+import { DOMBaseNode, DOMElementNode, DOMState, DOMTextNode, SelectorMap } from './types';
+
+declare global {
+  interface Window {
+    getDomTree: (highlightElements: boolean) => any;
+  }
+}
 
 export class DomService {
-  private xpathCache: Record<string, any> = {};
+  private readonly page: Page;
+  private readonly domScriptPath: string;
 
-  constructor(private page: Page) { }
+  constructor(page: Page) {
+    this.page = page;
+    this.domScriptPath = join(__dirname, './buildDomTree.js');
+  }
 
-  async getClickableElements(highlightElements = true): Promise<DOMState> {
-    const elementTree = await this.buildDomTree(highlightElements);
-    const selectorMap = this.createSelectorMap(elementTree);
+  async getDomState(highlightElements = false): Promise<DOMState> {
+    const domScript = readFileSync(this.domScriptPath, 'utf-8');
+    await this.page.evaluate(`window.getDomTree = ${domScript}`);
+    await this.page.evaluate(`window.getDomTree(${highlightElements})`);
+
+    const htmlToDict = await this.buildDomTree(highlightElements);
+    const selectorMap = this.createSelectorMap(htmlToDict);
 
     return {
-      elementTree,
-      selectorMap
+      elementTree: htmlToDict,
+      selectorMap,
     };
   }
 
   private async buildDomTree(highlightElements: boolean): Promise<DOMElementNode> {
-    // TODO: Read the JS code from a file like Python does
-    const jsCode = readFileSync(join(__dirname, 'buildDomTree.js'), 'utf8');
+    const domScript = readFileSync(this.domScriptPath, 'utf-8');
+    await this.page.evaluate(domScript);
 
+    const htmlToDict = await this.page.evaluate((highlightElements: boolean) => {
+      return window.getDomTree(highlightElements);
+    }, highlightElements);
 
-    await this.page.evaluate(`window.buildDomTree = ${jsCode}`);
-
-    const evalPage = await this.page.evaluate(`window.buildDomTree(${highlightElements})`);
-    
-
-    const htmlToDict = this.parseNode(evalPage);
-
-    if (!htmlToDict || !(htmlToDict instanceof DOMElementNode)) {
-      throw new Error('Failed to parse HTML to dictionary');
+    const parsedDict = this.parseNode(htmlToDict);
+    if (!parsedDict || !(parsedDict instanceof DOMElementNode)) {
+      throw new Error('Failed to build DOM tree');
     }
 
-    return htmlToDict;
+    return parsedDict;
   }
 
   private createSelectorMap(elementTree: DOMElementNode): SelectorMap {
@@ -42,10 +53,9 @@ export class DomService {
 
     const processNode = (node: DOMBaseNode): void => {
       if (node instanceof DOMElementNode) {
-        if (node.highlightIndex !== undefined) {
+        if (node.highlightIndex !== null) {
           selectorMap[node.highlightIndex] = node;
         }
-
         for (const child of node.children) {
           processNode(child);
         }
@@ -57,42 +67,37 @@ export class DomService {
   }
 
   private parseNode(nodeData: any, parent?: DOMElementNode): DOMBaseNode | null {
-    if (!nodeData) {
+    if (!nodeData || typeof nodeData !== 'object') {
       return null;
     }
 
     if (nodeData.type === 'TEXT_NODE') {
       return new DOMTextNode(
-        nodeData.text,
         nodeData.isVisible,
-        parent
+        nodeData.text,
+        parent || null
       );
     }
 
     const elementNode = new DOMElementNode(
+      nodeData.isVisible,
       nodeData.tagName,
       nodeData.xpath,
-      nodeData.attributes || {},
+      nodeData.attributes,
       [],
-      nodeData.isVisible ?? false,
-      nodeData.isInteractive ?? false,
-      nodeData.isTopElement ?? false,
-      nodeData.shadowRoot ?? false,
+      nodeData.isInteractive,
+      nodeData.isTopElement,
+      nodeData.shadowRoot,
       nodeData.highlightIndex,
-      parent
+      parent || null
     );
 
-    const children: DOMBaseNode[] = [];
-    for (const child of nodeData.children || []) {
-      if (child !== null) {
-        const childNode = this.parseNode(child, elementNode);
-        if (childNode !== null) {
-          children.push(childNode);
-        }
-      }
+    if (Array.isArray(nodeData.children)) {
+      elementNode.children = nodeData.children
+        .map((child: any) => this.parseNode(child, elementNode))
+        .filter((node: any): node is DOMBaseNode => node !== null);
     }
 
-    elementNode.children = children;
     return elementNode;
   }
 

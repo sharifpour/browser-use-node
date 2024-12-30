@@ -1,16 +1,27 @@
-import type { ActionResult } from '../../../agent/views';
+import { ActionResult } from '../../../agent/views';
 import type { BrowserContext } from '../../../browser/context';
 import { ActionModel } from '../views';
 
 type TabActionType = 'new' | 'switch' | 'close';
 
 export class TabAction extends ActionModel {
-  constructor(
-    public action: TabActionType,
-    public url?: string,
-    public pageId?: number
-  ) {
+  action: TabActionType;
+  url?: string;
+  pageId?: number;
+
+  constructor(data?: Record<string, any>) {
     super();
+    if (data && typeof data.action === 'string' && ['new', 'switch', 'close'].includes(data.action)) {
+      this.action = data.action as TabActionType;
+      if (data.url !== undefined) {
+        this.url = String(data.url);
+      }
+      if (data.pageId !== undefined) {
+        this.pageId = Number(data.pageId);
+      }
+    } else {
+      throw new Error('Action is required for tab action');
+    }
   }
 
   static getName(): string {
@@ -29,8 +40,8 @@ Example:
   {"tab": {"action": "close"}}`;
   }
 
-  getIndex(): number | undefined {
-    return undefined;
+  getIndex(): number | null {
+    return null;
   }
 
   setIndex(_index: number): void {
@@ -48,7 +59,7 @@ Example:
           break;
         case 'switch':
           if (action.pageId === undefined) {
-            return { error: 'Page ID is required for switch action' };
+            return new ActionResult({ error: 'Page ID is required for switch action' });
           }
           await browserContext.switchToTab(action.pageId);
           break;
@@ -56,11 +67,11 @@ Example:
           await browserContext.closeCurrentTab();
           break;
         default:
-          return { error: `Invalid tab action: ${action.action}` };
+          return new ActionResult({ error: `Invalid tab action: ${action.action}` });
       }
-      return {};
+      return new ActionResult({});
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) };
+      return new ActionResult({ error: error instanceof Error ? error.message : String(error) });
     }
   }
 }

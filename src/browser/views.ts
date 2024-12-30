@@ -1,41 +1,5 @@
-import type { DOMElementNode, SelectorMap } from '../dom/views';
-
-// Python source reference:
-// """
-// Browser views.
-// """
-//
-// from dataclasses import dataclass
-// from typing import Any, Dict, List, Optional
-//
-// from browser_use.dom.views import DOMElementNode
-//
-//
-// class BrowserError(Exception):
-// 	"""Browser error."""
-//
-// 	pass
-//
-//
-// @dataclass
-// class TabInfo:
-// 	"""Tab info."""
-//
-// 	page_id: int
-// 	url: str
-// 	title: str
-//
-//
-// @dataclass
-// class BrowserState:
-// 	"""Browser state."""
-//
-// 	element_tree: DOMElementNode
-// 	selector_map: dict[str, str]
-// 	url: str
-// 	title: str
-// 	screenshot: Optional[str] = None
-// 	tabs: list[TabInfo] = None
+import type { DOMHistoryElement } from '../dom/history_tree_processor/service';
+import type { DOMState } from '../dom/views';
 
 export interface TabInfo {
   pageId: number;
@@ -43,62 +7,49 @@ export interface TabInfo {
   title: string;
 }
 
-export interface BrowserTab extends Omit<TabInfo, 'pageId'> {
-  pageId: string;
-}
-
-export interface BrowserState {
-  elementTree: DOMElementNode;
-  selectorMap: SelectorMap;
+export interface BrowserState extends DOMState {
   url: string;
   title: string;
-  tabs: BrowserTab[];
+  tabs: TabInfo[];
   screenshot?: string;
+}
+
+export class BrowserStateHistory {
+  constructor(
+    public url: string,
+    public title: string,
+    public tabs: TabInfo[],
+    public interactedElement: (DOMHistoryElement | null)[],
+    public screenshot: string | null = null
+  ) { }
+
+  toDict(): Record<string, any> {
+    return {
+      url: this.url,
+      title: this.title,
+      tabs: this.tabs.map(tab => ({
+        page_id: tab.pageId,
+        title: tab.title,
+        url: tab.url
+      })),
+      interacted_element: this.interactedElement.map(el =>
+        el ? {
+          tag_name: el.tagName,
+          xpath: el.xpath,
+          highlight_index: el.highlightIndex,
+          entire_parent_branch_path: el.entireParentBranchPath,
+          attributes: el.attributes,
+          shadow_root: el.shadowRoot
+        } : null
+      ),
+      screenshot: this.screenshot
+    };
+  }
 }
 
 export class BrowserError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'BrowserError';
-  }
-}
-
-export class BrowserStateHistory {
-  constructor(
-    private data: {
-      url: string;
-      title: string;
-      tabs: BrowserTab[];
-      interactedElement: (string | null)[];
-      screenshot: string | null;
-    }
-  ) { }
-
-  toDict(): Record<string, any> {
-    return {
-      url: this.data.url,
-      title: this.data.title,
-      tabs: this.data.tabs.map(tab => ({
-        page_id: tab.pageId,
-        title: tab.title,
-        url: tab.url
-      })),
-      interacted_element: this.data.interactedElement,
-      screenshot: this.data.screenshot
-    };
-  }
-
-  static fromDict(data: Record<string, any>): BrowserStateHistory {
-    return new BrowserStateHistory({
-      url: data.url,
-      title: data.title,
-      tabs: data.tabs.map((tab: any) => ({
-        pageId: tab.page_id,
-        title: tab.title,
-        url: tab.url
-      })),
-      interactedElement: data.interacted_element,
-      screenshot: data.screenshot
-    });
   }
 }
