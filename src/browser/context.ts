@@ -509,18 +509,23 @@ export class BrowserContext {
   }
 
   async getElementByIndex(index: number): Promise<ElementHandle | null> {
-    const session = await this.getSession();
-    if (!this.domService) {
-      this.domService = new DomService(session.currentPage);
+    const page = await this.getCurrentPage();
+
+    // Try to find element by highlight attribute directly
+    const elements = await page.$$(`[browser-user-highlight-id="playwright-highlight-${index}"]`);
+    if (elements.length > 0) {
+      return elements[0];
     }
 
-    const state = await this.getState();
-    const element = state.selectorMap[index];
-    if (!element) {
-      return null;
+    // If not found, try to update state and search again
+    await this.getState();
+    const elements2 = await page.$$(`[browser-user-highlight-id="playwright-highlight-${index}"]`);
+    if (elements2.length > 0) {
+      return elements2[0];
     }
 
-    return this.getLocateElement(element);
+    logger.debug(`Failed to find element with index ${index}`);
+    return null;
   }
 
   async updateSelectorMap(): Promise<void> {
@@ -594,5 +599,31 @@ export class BrowserContext {
     }
 
     return false;
+  }
+
+  async clickElement(element: ElementHandle, expectNavigation = false): Promise<void> {
+    const page = await this.getCurrentPage();
+
+    if (expectNavigation) {
+      logger.debug('Expecting navigation after click');
+      const currentUrl = page.url();
+
+      // Create a promise that resolves when navigation is complete
+      const navigationPromise = page.waitForURL(url => url.href !== currentUrl, { timeout: 10000 })
+        .then(() => page.waitForLoadState('domcontentloaded'))
+        .then(() => page.waitForLoadState('networkidle'))
+        .catch(error => {
+          logger.debug(`Navigation error: ${error}`);
+          // Don't throw, just log the error
+        });
+
+      // Click the element
+      await element.click({ force: true, timeout: 5000 });
+
+      // Wait for navigation to complete
+      await navigationPromise;
+    } else {
+      await element.click({ timeout: 5000 });
+    }
   }
 }
