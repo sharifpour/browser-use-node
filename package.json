@@ -12,7 +12,7 @@
 		"lint": "biome check src/**/*.ts",
 		"format": "biome format src/**/*.ts",
 		"prepare": "bun run build",
-		"example:amazon": "bun run examples/amazon-search.ts",
+		"example:google": "bun run examples/google-search.ts",
 		"test:smoke": "bun test tests/smoke/smoke.test.ts",
 		"type-check": "bun run tsc --noEmit"
 	},
