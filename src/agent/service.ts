@@ -220,7 +220,7 @@ export class Agent {
     }
   }
 
-  @timeExecutionAsync('step')
+  @timeExecutionAsync('--step')
   async step(stepInfo?: AgentStepInfo): Promise<void> {
     logger.info(`\n📍 Step ${this.nSteps}`);
     let state: BrowserState | null = null;
