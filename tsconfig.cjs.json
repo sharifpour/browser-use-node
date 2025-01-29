@@ -1,0 +1,12 @@
+{
+    "extends": "./tsconfig.json",
+    "compilerOptions": {
+        "rootDirs": [
+            "src",
+            "examples/**/*"
+        ],
+        "outDir": "dist/cjs",
+        "module": "CommonJS",
+        "target": "ES2019"
+    }
+}
