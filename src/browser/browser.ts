@@ -55,7 +55,7 @@ export class Browser {
 
   private async setupBrowser(): Promise<PlaywrightBrowser> {
     if (this.config.wssUrl) {
-      return await chromium.connect(this.config.wssUrl);
+      return await chromium.connectOverCDP(this.config.wssUrl);
     }
 
     const args = [
