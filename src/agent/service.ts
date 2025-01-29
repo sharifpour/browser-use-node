@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
-import { ChatOpenAI } from 'langchain/chat_models/openai';
-import { BaseMessage } from 'langchain/schema';
+import { ChatOpenAI, } from 'langchain/chat_models/openai';
+import { BaseMessage, SystemMessage } from 'langchain/schema';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { Browser } from '../browser/browser';
@@ -12,13 +12,14 @@ import { type DOMHistoryElement } from '../dom/history_tree_processor/service';
 import { timeExecutionAsync } from '../utils';
 import { logger } from '../utils/logging';
 import { MessageManager } from './message_manager/service';
-import { SystemPrompt } from './prompts';
+import { AgentMessagePrompt, SystemPrompt } from './prompts';
 import {
   ActionResult,
   AgentError,
   AgentHistory,
   AgentHistoryList,
   AgentOutput,
+  AgentValidationOutput,
   type AgentStepInfo
 } from './views';
 
@@ -341,17 +342,22 @@ export class Agent {
 
         await this.step(stepInfo);
 
-        // Check if we're done
-        if (this.history.isDone()) {
-          logger.info('Task completed successfully');
-          shouldContinue = false;
-        }
-
         // Check if we've hit the max steps
         if (this.nSteps >= stepInfo.maxSteps) {
           logger.warning('Maximum steps reached, forcing completion');
           shouldContinue = false;
         }
+
+        // Check if we're done
+        if (this.history.isDone()) {
+          logger.info('A set of actions completed successfully');
+
+          if (await this.isTaskCompleted()) {
+            logger.info('Task completed successfully');
+            shouldContinue = false;
+          }
+        }
+
       }
     } finally {
       // Clean up if we created the browser/context
@@ -362,5 +368,46 @@ export class Agent {
         await this.browser.close();
       }
     }
+  }
+
+  async isTaskCompleted(): Promise<Boolean> {
+    let currentState: BrowserState | null = null;
+
+    const promptText =
+      `You are a validator of an agent who interacts with a browser. \n
+			 Validate if the output of last action is what the user wanted and if the task is completed. \n
+			 If the task is unclear defined, you can let it pass. But if something is missing or the image does not show what was requested dont let it pass. \n
+			 Try to understand the page and help the model with suggestions like scroll, do x, ... to get the solution right. \n
+			 Task to validate: ${this.task}. Return a JSON object with 2 keys: is_valid and reason. \n
+			 is_valid is a boolean that indicates if the output is correct. \n
+			 reason is a string that explains why it is valid or not. \n
+			 example: {{"is_valid": false, "reason": "The user wanted to search for "cat photos", but the agent searched for "dog photos" instead."}}`
+
+    const systemMessage = new SystemMessage(promptText)
+    currentState = await this.browserContext.getState(this.useVision);
+
+    const content = new AgentMessagePrompt({
+      state: currentState,
+      result: this.lastResult,
+      includeAttributes: this.includeAttributes,
+      maxErrorLength: this.maxErrorLength,
+    });
+
+    const schema = AgentValidationOutput.typeWithCustomValidationResponse();
+    const structuredLLM = this.llm.withStructuredOutput(schema);
+    const response = await structuredLLM.invoke([systemMessage, content.getUserMessage()]);
+    const parsed = response as unknown as AgentValidationOutput;
+
+    if (!parsed.is_valid) {
+      logger.info(`❌ Validator decision: ${parsed.reason}`)
+      const message = `The output is not yet correct. ${parsed.reason}.`
+
+      this.lastResult?.push(new ActionResult({
+        error: message,
+        includeInMemory: true
+      }));
+    } else logger.info(`✅ Validator decision: ${parsed.reason}`)
+
+    return parsed.is_valid;
   }
 }

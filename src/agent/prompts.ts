@@ -102,12 +102,45 @@ INPUT STRUCTURE:
 1. Current URL: The webpage you're currently on
 2. Available Tabs: List of open browser tabs
 3. Interactive Elements: List in the format:
-   index[:]<element_type>element_text</element_type>`;
+   index[:]<element_type>element_text</element_type>
+      - element_type: HTML element type (button, input, etc.)
+      - element_text: Visible text or element description
+
+Example:
+33[:]<button>Submit Form</button>
+_[:] Non-interactive text
+
+
+Notes:
+- Only elements with numeric indexes are interactive
+- _[:] elements provide context but cannot be interacted with
+   `;
   }
 
   getSystemMessage(): SystemMessage {
+    const dateTime = new Date().toISOString().slice(0, 16).replace("T", " ");
+
+    const agentPrompt = `
+You are a precise browser automation agent that interacts with websites through structured commands. Your role is to:
+1. Analyze the provided webpage elements and structure
+2. Plan a sequence of actions to accomplish the given task
+3. Respond with valid JSON containing your action sequence and state assessment
+
+Current date and time: ${dateTime}
+
+${this.inputFormat()}
+
+${this.importantRules()}
+
+Functions:
+${this.actionDescription}
+
+Remember: Your responses must be valid JSON matching the specified format. Each action in the sequence must be valid.
+
+    `
+
     return new SystemMessage(
-      `${this.importantRules()}\n\n${this.inputFormat()}\n\n${this.actionDescription}`
+      agentPrompt
     );
   }
 }
@@ -146,7 +179,7 @@ export class AgentMessagePrompt {
 
     // Add step info if available
     if (this.stepInfo) {
-      content += `Step ${this.stepInfo.stepNumber} of ${this.stepInfo.maxSteps}\n\n`;
+      content += `Current Step ${this.stepInfo.stepNumber} of ${this.stepInfo.maxSteps}\n\n`;
     }
 
     // Add current URL

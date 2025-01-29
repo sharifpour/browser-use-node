@@ -88,6 +88,20 @@ export class AgentOutput {
   }
 }
 
+export class AgentValidationOutput{
+  is_valid:boolean = false;
+  reason:string = "";
+
+  static typeWithCustomValidationResponse(): z.ZodType<AgentValidationOutput> {
+
+    return z.object({
+      is_valid: z.boolean(),
+      reason:z.string() 
+    }) as unknown as z.ZodType<AgentValidationOutput>;
+  }
+
+}
+
 export interface AgentStepInfo {
   stepNumber: number;
   maxSteps: number;
